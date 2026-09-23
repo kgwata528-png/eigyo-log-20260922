@@ -686,16 +686,18 @@ function togglePins() {
   applyMapFilters();
 }
 
+// ── 地図の初期化・APIスクリプトの動的読み込み ──
 function initMap() {
   if (mapInitialized) return;
-  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'AIzaSyDAjCfUJJTzLI2Z8RwLW_O7QGwTO_6mO9U') {
-    document.getElementById('map').innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:32px;text-align:center;background:#f5f5f7;"><p style="color:#1a1a1a;font-size:16px;font-weight:600;">APIキーを設定してください</p></div>`;
-    return;
-  }
+
+  // すでに script タグが存在していれば二重追加しない
+  if (document.getElementById('google-maps-sdk')) return;
+
   const script = document.createElement('script');
-script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=onMapReady&loading=async`;
-script.async = true;
-document.head.appendChild(script);
+  script.id = 'google-maps-sdk';
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=onMapReady&loading=async&libraries=places`;
+  script.async = true;
+  document.head.appendChild(script);
 }
 
 window.onMapReady = function() {
@@ -1172,7 +1174,6 @@ function clearAllData() {
     location.reload();
   }
 }
-// 引数に item（物件・訪問先データ）または rank などを追加するよ
 function addVisitMarker(rec) {
   if (!rec || !rec.lat || !rec.lng) return null;
 
@@ -1207,6 +1208,9 @@ function addVisitMarker(rec) {
       fontWeight: 'bold'
     }
   });
+
+  // ★ ここを追加！ フィルター用にランク情報をマーカーオブジェクトに持たせる
+  marker._rank = rank;
 
   if (typeof visitMarkers !== 'undefined') {
     visitMarkers.push(marker);
