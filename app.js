@@ -1209,8 +1209,42 @@ function addVisitMarker(rec) {
     }
   });
 
-  // ★ ここを追加！ フィルター用にランク情報をマーカーオブジェクトに持たせる
+  // フィルター用にランク情報をマーカーオブジェクトに持たせる
   marker._rank = rank;
+
+  // ★ ここから吹き出し（InfoWindow）の作成とクリック処理！
+  const contentString = `
+    <div style="padding:6px; max-width:200px; font-family:sans-serif; color:#333;">
+      <div style="font-weight:bold; font-size:14px; margin-bottom:4px;">
+        ${rec.name || '名前未入力'}
+      </div>
+      <div style="font-size:12px; color:#666; margin-bottom:4px;">
+        📍 ${rec.address || '住所未入力'}
+      </div>
+      <div style="font-size:12px; margin-bottom:4px;">
+        <span style="background:${bgColor}; color:${txColor}; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px;">
+          ランク: ${rank}
+        </span>
+        <span style="margin-left:6px; color:#555; font-weight:500;">
+          ${rec.response || ''}
+        </span>
+      </div>
+      ${rec.memo ? `<div style="font-size:11px; color:#777; border-top:1px solid #eee; padding-top:4px; margin-top:4px;">${rec.memo}</div>` : ''}
+    </div>
+  `;
+
+  const infoWindow = new google.maps.InfoWindow({
+    content: contentString
+  });
+
+  // ピンをクリック（タップ）したときに吹き出しを開く
+  marker.addListener('click', () => {
+    if (window.currentInfoWindow) {
+      window.currentInfoWindow.close();
+    }
+    infoWindow.open(activeMap, marker);
+    window.currentInfoWindow = infoWindow;
+  });
 
   if (typeof visitMarkers !== 'undefined') {
     visitMarkers.push(marker);
@@ -1218,7 +1252,6 @@ function addVisitMarker(rec) {
 
   return marker;
 }
-
 // ── 現在地に移動 ──
 function goToCurrentPos() {
   if (!navigator.geolocation) {
