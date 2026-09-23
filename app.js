@@ -1,4 +1,4 @@
-const GOOGLE_MAPS_API_KEY = 'AIzaSyCvVHG4TulMY0qUs7i9JfAd88md31D7BQw';
+const GOOGLE_MAPS_API_KEY = 'AIzaSyDAjCfUJJTzLI2Z8RwLW_O7QGwTO_6mO9U';
 
 // ── データバージョン管理（アップデートしてもデータが消えない） ──
 const DATA_VERSION = '1';
@@ -688,7 +688,7 @@ function togglePins() {
 
 function initMap() {
   if (mapInitialized) return;
-  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'AIzaSyCK4tmRWc1IKUQP6mHz7dzSGnPLdn6cdT8') {
+  if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === 'AIzaSyDAjCfUJJTzLI2Z8RwLW_O7QGwTO_6mO9U') {
     document.getElementById('map').innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;padding:32px;text-align:center;background:#f5f5f7;"><p style="color:#1a1a1a;font-size:16px;font-weight:600;">APIキーを設定してください</p></div>`;
     return;
   }
