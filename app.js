@@ -1348,3 +1348,111 @@ function getDistance(p1, p2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+
+// ── Excel出力（エクスポート） ──
+function exportExcel() {
+  if (!records || records.length === 0) {
+    alert('出力するデータがありません');
+    return;
+  }
+
+  const exportData = records.map(r => ({
+    '日付': r.date || '',
+    '名前': r.name || '',
+    '住所': r.address || '',
+    '対応区分': r.response || '',
+    '見込みランク': r.rank || '',
+    '訪問種別': r.visit || '',
+    'メモ': r.memo || '',
+    '緯度': r.lat || '',
+    '経度': r.lng || ''
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, '営業ログ');
+
+  const now = new Date();
+  const filename = `営業ログ_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.xlsx`;
+  XLSX.writeFile(workbook, filename);
+}
+
+// ── Excel読み込み（インポート完全防衛版） ──
+function importExcel() {
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.xlsx, .xls, .csv';
+
+  fileInput.onchange = function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+        if (!jsonData || jsonData.length === 0) {
+          alert('ファイル内にデータが見つかりませんでした');
+          return;
+        }
+
+        let addedCount = 0;
+        jsonData.forEach(row => {
+          // カラム名の揺れ（表記違い）を強力に吸収する処理
+          const name = row['名前'] || row['氏名'] || row['お客様名'] || row['顧客名'] || '名前未入力';
+          const address = row['住所'] || row['所在地'] || '住所未入力';
+          const rank = row['見込みランク'] || row['ランク'] || row['rank'] || 'E';
+          const response = row['対応区分'] || row['対応'] || row['結果'] || '不在';
+          const visit = row['訪問種別'] || row['種別'] || '初訪';
+          const date = row['日付'] || row['日時'] || new Date().toLocaleDateString('ja-JP');
+          const memo = row['メモ'] || row['備考'] || '';
+
+          const rec = {
+            id: Date.now() + Math.floor(Math.random() * 10000),
+            date: String(date),
+            timestamp: Date.now(),
+            visit: String(visit),
+            response: String(response),
+            rank: String(rank).trim().toUpperCase(),
+            name: String(name).trim(),
+            address: String(address).trim(),
+            memo: String(memo),
+            lat: row['緯度'] ? Number(row['緯度']) : null,
+            lng: row['経度'] ? Number(row['経度']) : null,
+          };
+
+          records.unshift(rec);
+          addedCount++;
+        });
+
+        // データの保存（LocalStorageへ直接保存して確実に残す！）
+        localStorage.setItem('sales_records', JSON.stringify(records));
+
+        // 画面描画の更新
+        if (typeof renderHistory === 'function') renderHistory();
+        
+        // 地図のピン更新
+        if (typeof addVisitMarker === 'function') {
+          records.forEach(r => { if (r.lat && r.lng) addVisitMarker(r); });
+        }
+        if (typeof applyMapFilters === 'function') applyMapFilters();
+
+        alert(`${addedCount}件のデータを読み込みました！`);
+
+      } catch (err) {
+        console.error('Excel読み込みエラー:', err);
+        alert('読み込み時にエラーが発生しました。ファイル形式を確認してください。');
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  fileInput.click();
+}
