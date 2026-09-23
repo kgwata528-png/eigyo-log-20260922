@@ -678,13 +678,39 @@ let lastTrailPoint = null;
 let visitMarkers = [];
 let pinsVisible = true;
 
+// ── ピン非表示 / 表示 切り替えボタン ──
 function togglePins() {
-  pinsVisible = !pinsVisible;
+  if (typeof window.pinsVisible === 'undefined') {
+    window.pinsVisible = true;
+  }
+  
+  window.pinsVisible = !window.pinsVisible;
+
+  // ボタンの文字変更（HTMLの id="pins-label" に対応）
+  const label = document.getElementById('pins-label');
   const btn = document.getElementById('pins-btn');
-  btn.classList.toggle('active', pinsVisible);
-  document.getElementById('pins-label').textContent = pinsVisible ? 'ピン表示' : 'ピン非表示';
-  applyMapFilters();
+  
+  if (label) {
+    label.textContent = window.pinsVisible ? 'ピン表示' : 'ピン非表示';
+  }
+  
+  // ボタンの見た目（activeクラス）の切り替え
+  if (btn) {
+    if (window.pinsVisible) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  }
+
+  // 地図上のマーカーをすべて表示・非表示切り替え
+  if (typeof visitMarkers !== 'undefined' && Array.isArray(visitMarkers)) {
+    visitMarkers.forEach(m => {
+      if (m) m.setVisible(window.pinsVisible);
+    });
+  }
 }
+
 
 // ── 地図の初期化・APIスクリプトの動的読み込み ──
 function initMap() {
@@ -800,8 +826,10 @@ function parseLogTime(r) {
   if (r.timestamp && typeof r.timestamp === 'number') return r.timestamp;
   if (!r.date) return 0;
   const parts = String(r.date).split(/[\/\-\s]/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+  const currentYear = new Date().getFullYear();
+  
   if (parts.length === 3) return new Date(parts[0], parts[1] - 1, parts[2]).getTime();
-  if (parts.length === 2) return new Date(2026, parts[0] - 1, parts[1]).getTime();
+  if (parts.length === 2) return new Date(currentYear, parts[0] - 1, parts[1]).getTime(); // 動的に本年の年を取得
   const d = new Date(r.date);
   return isNaN(d.getTime()) ? 0 : d.getTime();
 }
@@ -1183,6 +1211,15 @@ function addVisitMarker(rec) {
     return null;
   }
 
+  // ★ 1. 重複防止チェック（すでに同じIDのピンが地図上にあれば削除）
+  if (typeof visitMarkers !== 'undefined' && Array.isArray(visitMarkers)) {
+    const existingIndex = visitMarkers.findIndex(m => m._recordId === rec.id);
+    if (existingIndex !== -1) {
+      visitMarkers[existingIndex].setMap(null); // 地図上から削除
+      visitMarkers.splice(existingIndex, 1);    // 配列から除去
+    }
+  }
+
   // ランクごとの色を取得
   const rank = rec.rank || 'F';
   const bgColor = (typeof RANK_BG !== 'undefined' && RANK_BG[rank]) ? RANK_BG[rank] : '#808080';
@@ -1192,27 +1229,29 @@ function addVisitMarker(rec) {
     position: { lat: Number(rec.lat), lng: Number(rec.lng) },
     map: activeMap,
     title: rec.name || rec.address || '',
-    visible: typeof pinsVisible !== 'undefined' ? pinsVisible : true,
+    visible: typeof window.pinsVisible !== 'undefined' ? window.pinsVisible : true,
     icon: {
       path: google.maps.SymbolPath.CIRCLE,
       fillColor: bgColor,
       fillOpacity: 0.95,
-      scale: 12,
+      scale: 8, // ★ 12から8に小さく変更！
       strokeColor: '#FFFFFF',
-      strokeWeight: 2,
+      strokeWeight: 1.5,
     },
     label: {
       text: String(rank),
       color: txColor,
-      fontSize: '11px',
+      fontSize: '9px', // ★ 11pxから9pxに小さく変更！
       fontWeight: 'bold'
     }
   });
 
-  // フィルター用にランク情報をマーカーオブジェクトに持たせる
+  // フィルター用にランク情報を持たせる
   marker._rank = rank;
+  // ★ 2. 重複チェック用にレコードIDを持たせる
+  marker._recordId = rec.id;
 
-  // ★ ここから吹き出し（InfoWindow）の作成とクリック処理！
+  // ★ 吹き出し（InfoWindow）の作成とクリック処理
   const contentString = `
     <div style="padding:6px; max-width:200px; font-family:sans-serif; color:#333;">
       <div style="font-weight:bold; font-size:14px; margin-bottom:4px;">
@@ -1252,6 +1291,7 @@ function addVisitMarker(rec) {
 
   return marker;
 }
+
 // ── 現在地に移動 ──
 function goToCurrentPos() {
   if (!navigator.geolocation) {
@@ -1485,7 +1525,7 @@ function importExcel() {
     };
 
     reader.readAsArrayBuffer(file);
-  };
+  }; // ← ここで onchange を閉じる！
 
   fileInput.click();
-}
+} // ← ここで importExcel を閉じる！
