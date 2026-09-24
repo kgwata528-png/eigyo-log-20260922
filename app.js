@@ -210,63 +210,167 @@ function norm(s) {
     .replace(/[\s　]/g, '')
     .toLowerCase();
 }
+// ── 入力中のリアルタイム重複・候補検索 ──
+// ── 入力中のリアルタイム重複・候補検索（複数表示版） ──
 function checkDuplicate() {
-  const name = norm(document.getElementById('inp-name').value);
-  const addr = norm(document.getElementById('inp-address').value);
-  if (!name && !addr) { hideBanner(); return; }
-  const hits = records.filter(r => {
-    const nameHit = name.length >= 1 && norm(r.name).includes(name);
-    const addrHit = addr.length >= 3 && norm(r.address).includes(addr);
-    return nameHit || addrHit;
+  const nameInput = document.getElementById('inp-name');
+  const addressInput = document.getElementById('inp-address');
+  const dupeBanner = document.getElementById('dupe-banner');
+  const dupeList = document.getElementById('dupe-list');
+
+  if (!dupeBanner || !dupeList) return;
+
+  const nameVal = nameInput ? nameInput.value.trim() : '';
+  const addrVal = addressInput ? addressInput.value.trim() : '';
+
+  // どちらも空なら候補欄を隠す
+  if (!nameVal && !addrVal) {
+    dupeBanner.style.display = 'none';
+    dupeList.innerHTML = '';
+    return;
+  }
+
+  // 過去の記録から検索
+  const recs = window.records || JSON.parse(localStorage.getItem('sales_records') || '[]');
+  
+  // 名前 または 住所 が一致する顧客をすべて抽出
+  const matches = recs.filter(r => {
+    const matchName = nameVal !== '' && r.name && r.name.includes(nameVal);
+    const matchAddr = addrVal !== '' && r.address && r.address.includes(addrVal);
+    return matchName || matchAddr;
   });
-  if (!hits.length) { hideBanner(); return; }
-  const grouped = {};
-  hits.forEach(r => {
-    const key = r.name + '__' + r.address;
-    if (!grouped[key]) grouped[key] = { name: r.name, address: r.address, visits: [] };
-    grouped[key].visits.push(r);
-  });
-  document.getElementById('dupe-list').innerHTML = Object.values(grouped).map(g => {
-    const last = g.visits[0];
-    return `<div class="dupe-card" onclick="applyCandidate('${escHtml(g.name)}','${escHtml(g.address)}','${last.rank}')">
-      <div class="dupe-name">${escHtml(g.name)}</div>
-      <div class="dupe-meta">${escHtml(g.address)} ・ ${g.visits.length}回訪問 ・ ランク${last.rank}${last.memo ? ' ・ ' + last.memo.slice(0, 20) : ''}</div>
-    </div>`;
-  }).join('');
-  document.getElementById('dupe-banner').style.display = 'block';
-}
-function hideBanner() { document.getElementById('dupe-banner').style.display = 'none'; }
-function applyCandidate(name, addr, rank) {
-  document.getElementById('inp-name').value = name;
-  document.getElementById('inp-address').value = addr;
-  setSelected('seg-visit', '再訪');
-  setSelected('seg-rank', rank);
-  hideBanner();
+
+  if (matches.length === 0) {
+    dupeBanner.style.display = 'none';
+    dupeList.innerHTML = '';
+    return;
+  }
+
+  // 候補を表示（該当するものを最大5件まで並べて表示）
+  dupeBanner.style.display = 'block';
+  dupeList.innerHTML = matches.slice(0, 5).map(item => `
+    <div onclick="selectDuplicateCandidate('${item.id}')" style="padding: 10px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; margin-top: 6px; cursor: pointer;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-weight: bold; font-size: 14px; color: #333;">${item.name || '名前未入力'} 様</div>
+        <span style="background: #f0f0f0; color: #555; padding: 2px 6px; border-radius: 4px; font-size: 11px;">ランク ${item.rank || 'E'}</span>
+      </div>
+      <div style="font-size: 12px; color: #666; margin-top: 2px;">📍 ${item.address || '住所未入力'}</div>
+      <div style="font-size: 11px; color: #1a73e8; margin-top: 4px;">タップして「再訪」としてセット</div>
+    </div>
+  `).join('');
 }
 
-// ── 記録保存 ──
-async function geocodeAddress(address) {
-  if (!address || address === '住所未入力') return null;
-  try {
-    const res = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&language=ja&region=jp&key=${GOOGLE_MAPS_API_KEY}`
-    );
-    const d = await res.json();
-    if (d.status === 'OK' && d.results.length > 0) {
-      const loc = d.results[0].geometry.location;
-      return { lat: loc.lat, lng: loc.lng };
+// ── 候補をタップしたときに自動入力する処理 ──
+// ── 候補をタップしたときに自動入力する処理 ──
+function selectDuplicateCandidate(id) {
+  const recs = window.records || JSON.parse(localStorage.getItem('sales_records') || '[]');
+  const target = recs.find(r => String(r.id) === String(id));
+  if (!target) return;
+
+  // 1. 名前・住所を入力欄にセット
+  const nameInput = document.getElementById('inp-name');
+  const addressInput = document.getElementById('inp-address');
+  if (nameInput) nameInput.value = target.name !== '名前未入力' ? target.name : '';
+  if (addressInput) addressInput.value = target.address !== '住所未入力' ? target.address : '';
+
+  // 2. 訪問種別を「再訪」に変更
+  const visitSegs = document.querySelectorAll('#seg-visit .seg');
+  visitSegs.forEach(btn => {
+    if (btn.getAttribute('data-val') === '再訪') {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
     }
-  } catch (e) {}
-  return null;
-}
-// 同一人物（名前＋住所）の全データのランクを同期する関数
-// ★ 勝手に過去データをCランク等に上書きしないよう無効化
-function syncPersonRank(name, address, newRank) {
-  // 履歴の改ざんを防ぐため無効化します
-  return;
+  });
+
+  // 3. 最新ランクをセット
+  if (target.rank) {
+    const rankSegs = document.querySelectorAll('#seg-rank .seg');
+    rankSegs.forEach(btn => {
+      if (btn.getAttribute('data-val') === target.rank) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  // 4. メモ欄をクリアして新規入力へ
+  const memoInput = document.getElementById('inp-memo');
+  if (memoInput) memoInput.value = '';
+
+  // ★ 既存の顧客IDを保持（保存時にこの顧客へメモを追加するため）
+  window.selectedCustomerId = target.id;
+
+  // 候補バナーを閉じる
+  const dupeBanner = document.getElementById('dupe-banner');
+  if (dupeBanner) dupeBanner.style.display = 'none';
 }
 
-// ★ 正常な saveRecord
+function renderCustomerList() {
+  const container = document.getElementById('customer-list-container');
+  if (!container) return;
+
+  const recs = JSON.parse(localStorage.getItem('sales_records') || '[]');
+
+  container.innerHTML = recs.map(cust => {
+    const memoList = cust.memos || [];
+    const memoCount = memoList.length;
+
+    // ★ メモ群を縦一列（1行1メモ）で作成
+    const memosHtml = memoList.map(m => `
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid #f0f0f0;">
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1; overflow: hidden;">
+          <span style="color: #888; font-size: 12px; white-space: nowrap;">${m.time}</span>
+          <span style="background: #f1f3f4; color: #3c4043; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; white-space: nowrap;">
+            ${m.type}
+          </span>
+          <span style="color: #333; font-size: 13px; word-break: break-all;">${m.text}</span>
+        </div>
+        <div style="display: flex; gap: 4px; margin-left: 8px; flex-shrink: 0;">
+          <button onclick="editMemo('${cust.id}', '${m.id}')" style="background: #e8f0fe; color: #1a73e8; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">編集</button>
+          <button onclick="deleteMemo('${cust.id}', '${m.id}')" style="background: #fce8e6; color: #c5221f; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">削除</button>
+        </div>
+      </div>
+    `).join('');
+
+    return `
+      <div style="background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+        <!-- 顧客情報ヘッダー -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 8px;">
+          <div>
+            <h3 style="margin: 0; font-size: 16px; color: #202124;">${cust.name}</h3>
+            <p style="margin: 4px 0 0; font-size: 12px; color: #5f6368;">${cust.address}</p>
+          </div>
+          <div style="text-align: right;">
+            <span style="background: ${getRankColor(cust.rank)}; color: #fff; font-weight: bold; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+              ランク ${cust.rank}
+            </span>
+            <div style="font-size: 11px; color: #70757a; margin-top: 4px;">計 ${memoCount} 回</div>
+          </div>
+        </div>
+
+        <!-- ★ 縦並びのメモ群（最新が一番上） -->
+        <div style="display: flex; flex-direction: column; margin-top: 4px;">
+          ${memosHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ランク別の色を返すユーティリティ
+function getRankColor(rank) {
+  switch (rank) {
+    case 'A': return '#1a73e8';
+    case 'B': return '#fbbc04'; // 画像の黄色系[cite: 1]
+    case 'C': return '#ea4335'; // 画像の赤系[cite: 1]
+    default: return '#70757a';
+  }
+}
+
+
+// ── 改善版 saveRecord ──
 async function saveRecord() {
   console.log('保存処理開始');
   
@@ -284,7 +388,7 @@ async function saveRecord() {
       return; 
     }
 
-    // 現在選択されているランクを正確に取得（選択されていない場合は空文字または 'D' や 'E' などの安全なデフォルト）
+    // ランクの取得
     let selectedRank = '';
     const activeRankBtn = document.querySelector('#seg-rank .active, [data-seg="seg-rank"].active');
     if (activeRankBtn) {
@@ -293,42 +397,87 @@ async function saveRecord() {
     if (!selectedRank && typeof getSelected === 'function') {
       try { selectedRank = getSelected('seg-rank'); } catch(e){}
     }
-    // 選択がない場合のフォールバック（Cではなく 'E' や 'D' などに変更）
     if (!selectedRank) selectedRank = 'E';
+
+    // 訪問種別（応答）の取得（例: 対面、不在、インターホンなど）
+    const visitResponse = (typeof getSelected === 'function' ? getSelected('seg-response') : null) || '対面';
 
     const now = new Date();
     const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const recName = name || '名前未入力';
     const recAddress = address || '住所未入力';
-
-    const rec = {
-      id: Date.now(),
-      date: dateStr,
-      timestamp: Date.now(),
-      visit: (typeof getSelected === 'function' ? getSelected('seg-visit') : null) || '初訪',
-      response: (typeof getSelected === 'function' ? getSelected('seg-response') : null) || '不在',
-      rank: selectedRank,
-      name: recName,
-      address: recAddress,
-      memo: memoInput ? memoInput.value.trim() : '',
-      lat: typeof lastLatLng !== 'undefined' && lastLatLng ? lastLatLng.lat : null,
-      lng: typeof lastLatLng !== 'undefined' && lastLatLng ? lastLatLng.lng : null,
-    };
+    const memoText = memoInput ? memoInput.value.trim() : '';
 
     if (!window.records || !Array.isArray(window.records)) {
-      window.records = typeof records !== 'undefined' && Array.isArray(records) ? records : [];
+      window.records = (typeof records !== 'undefined' && Array.isArray(records)) ? records : [];
     }
 
-    // 重複登録のチェック（同じIDがないか）
-    const exists = records.some(r => r.id === rec.id);
-    if (!exists) {
-      records.unshift(rec);
+    // ★今回の新しいメモオブジェクト
+    const newMemoObj = {
+      id: Date.now().toString(),
+      date: dateStr,
+      response: visitResponse,
+      text: memoText
+    };
+
+    // 同一顧客の存在チェック（「候補タップ」または「完全同名・同住所」）
+    let existingIndex = -1;
+    if (window.selectedCandidateId) {
+      existingIndex = window.records.findIndex(r => String(r.id) === String(window.selectedCandidateId));
+    }
+    if (existingIndex === -1 && name && address) {
+      existingIndex = window.records.findIndex(r => r.name === recName && r.address === recAddress);
     }
 
-    // LocalStorageへ保存
+    if (existingIndex !== -1) {
+      // ── 【既存顧客の更新】 ──
+      const oldRec = window.records[existingIndex];
+      
+      // 既存のメモ配列を取得（旧形式の文字列メモがある場合は配列に変換して吸収）
+      let currentMemos = Array.isArray(oldRec.memos) ? oldRec.memos : [];
+      if (!Array.isArray(oldRec.memos) && oldRec.memo) {
+        currentMemos = [{ id: 'old-1', date: oldRec.date || dateStr, response: oldRec.response || '対面', text: oldRec.memo }];
+      }
+
+      // ★ 最新のメモを「配列の先頭（unshift）」に追加して一番上に表示されるようにする
+      if (memoText) {
+        currentMemos.unshift(newMemoObj);
+      }
+
+      window.records[existingIndex] = {
+        ...oldRec,
+        date: dateStr, // 最新の活動日時
+        timestamp: Date.now(),
+        visit: (typeof getSelected === 'function' ? getSelected('seg-visit') : null) || '再訪',
+        response: visitResponse,
+        rank: selectedRank, // 最新ランクに更新
+        memos: currentMemos, // ★ 配列化されたメモ群
+        lat: (typeof lastLatLng !== 'undefined' && lastLatLng) ? lastLatLng.lat : oldRec.lat,
+        lng: (typeof lastLatLng !== 'undefined' && lastLatLng) ? lastLatLng.lng : oldRec.lng,
+      };
+    } else {
+      // ── 【完全新規顧客の追加】 ──
+      const newRec = {
+        id: Date.now().toString(),
+        date: dateStr,
+        timestamp: Date.now(),
+        visit: (typeof getSelected === 'function' ? getSelected('seg-visit') : null) || '初訪',
+        response: visitResponse,
+        rank: selectedRank,
+        name: recName,
+        address: recAddress,
+        memos: memoText ? [newMemoObj] : [], // ★ メモ配列として保持
+        lat: typeof lastLatLng !== 'undefined' && lastLatLng ? lastLatLng.lat : null,
+        lng: typeof lastLatLng !== 'undefined' && lastLatLng ? lastLatLng.lng : null,
+      };
+      window.records.unshift(newRec);
+    }
+
+    // 同期して LocalStorage へ書き込み
+    records = window.records;
     try {
-      localStorage.setItem('sales_records', JSON.stringify(records));
+      localStorage.setItem('sales_records', JSON.stringify(window.records));
     } catch (e) {
       console.error('LocalStorage Save Error:', e);
     }
@@ -338,20 +487,28 @@ async function saveRecord() {
     if (addressInput) addressInput.value = '';
     if (memoInput) memoInput.value = '';
     if (typeof lastLatLng !== 'undefined') lastLatLng = null;
+    window.selectedCandidateId = null;
+
+    const dupeBanner = document.getElementById('dupe-banner');
+    if (dupeBanner) dupeBanner.style.display = 'none';
 
     if (btn) {
       btn.textContent = '✓ 保存しました';
       setTimeout(() => { btn.textContent = '保存する'; }, 1500);
     }
 
-    // 描画更新
+    // 描画・地図描画更新
     if (typeof renderHistory === 'function') renderHistory();
-    if (typeof createAllMarkers === 'function') createAllMarkers();
+    if (typeof addVisitMarker === 'function') {
+      const targetRec = existingIndex !== -1 ? window.records[existingIndex] : window.records[0];
+      if (targetRec.lat && targetRec.lng) addVisitMarker(targetRec);
+    }
 
   } catch (err) {
     alert('保存処理中にエラーが発生しました: ' + err.message);
   }
 }
+
 
 // ── 編集・削除 ──
 function openEdit(id) {
