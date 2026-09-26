@@ -51,6 +51,7 @@
         <div>
           <p class="counter-row-label">不在</p>
           <p class="counter-row-num" id="cnt-absent">0</p>
+          <p id="rate-absent" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
         </div>
         <div class="counter-row-btns">
           <button class="btn-minus" onclick="bump('absent',-1)" aria-label="不在を減らす">－</button>
@@ -61,6 +62,7 @@
         <div>
           <p class="counter-row-label">インターホン</p>
           <p class="counter-row-num" id="cnt-intercom">0</p>
+          <p id="rate-intercom" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
         </div>
         <div class="counter-row-btns">
           <button class="btn-minus" onclick="bump('intercom',-1)" aria-label="インターホンを減らす">－</button>
@@ -71,6 +73,7 @@
         <div>
           <p class="counter-row-label">対面</p>
           <p class="counter-row-num" id="cnt-face">0</p>
+          <p id="rate-face" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
         </div>
         <div class="counter-row-btns">
           <button class="btn-minus" onclick="bump('face',-1)" aria-label="対面を減らす">－</button>
@@ -114,7 +117,7 @@
           <div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
               <span style="font-size:12px;color:var(--text2);">対面</span>
-              <span style="font-size:12px;font-weight:600;color:var(--success);" id="m-face-rate">0%</span>
+              <span style="font-size:12px;font-weight:600;color:var(--success);white-space:nowrap;" id="m-face-rate">0件（0%）</span>
             </div>
             <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;">
               <div id="m-face-bar" style="height:100%;background:var(--success);border-radius:3px;width:0%;transition:width 0.4s;"></div>
@@ -123,7 +126,7 @@
           <div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
               <span style="font-size:12px;color:var(--text2);">インターホン</span>
-              <span style="font-size:12px;font-weight:600;color:var(--warning);" id="m-intercom-rate">0%</span>
+              <span style="font-size:12px;font-weight:600;color:var(--warning);white-space:nowrap;" id="m-intercom-rate">0件（0%）</span>
             </div>
             <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;">
               <div id="m-intercom-bar" style="height:100%;background:var(--warning);border-radius:3px;width:0%;transition:width 0.4s;"></div>
@@ -132,7 +135,7 @@
           <div>
             <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
               <span style="font-size:12px;color:var(--text2);">不在</span>
-              <span style="font-size:12px;font-weight:600;color:var(--text3);" id="m-absent-rate">0%</span>
+              <span style="font-size:12px;font-weight:600;color:var(--text3);white-space:nowrap;" id="m-absent-rate">0件（0%）</span>
             </div>
             <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;">
               <div id="m-absent-bar" style="height:100%;background:var(--text3);border-radius:3px;width:0%;transition:width 0.4s;"></div>
@@ -207,7 +210,7 @@
       <div style="display:flex;gap:8px;">
         <div class="search-wrap">
           <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="search-inp" class="search-input" placeholder="名前・住所で検索" oninput="renderHistory()" />
+          <input type="text" id="search-inp" class="search-input" placeholder="名前・住所・メモで検索" oninput="renderHistory()" />
         </div>
         <select id="rank-filter" class="rank-select" onchange="renderHistory()">
           <option value="">全ランク</option>
@@ -229,15 +232,19 @@
 <main class="tab-panel" id="tab-folders">
   <div class="history-wrap">
 
+    <!-- フォルダ一覧ビュー -->
+    <div id="folder-list-view">
+
     <!-- 検索→絞り込み→フォルダ化 -->
     <div style="background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--radius);padding:14px;margin-bottom:16px;box-shadow:var(--shadow);">
-      <p style="font-size:12px;color:var(--text2);margin-bottom:8px;font-weight:500;">住所で検索して絞り込み</p>
-      <input type="text" id="folder-search" class="field-input" placeholder="例: 練馬区南大泉5丁目" oninput="previewFolderSearch()" style="margin-bottom:8px;" />
+      <p style="font-size:12px;color:var(--text2);margin-bottom:4px;font-weight:500;">キーワードで顧客を検索してフォルダにまとめる</p>
+      <p style="font-size:11px;color:var(--text3);margin-bottom:8px;">名前・住所・メモの内容で検索できます</p>
+      <input type="text" id="folder-search" class="field-input" placeholder="例: 戸建て, 駐車場あり, 南大泉5丁目" oninput="previewFolderSearch()" style="margin-bottom:8px;" />
       <p id="folder-preview-count" style="font-size:12px;color:var(--text3);margin-bottom:10px;"></p>
       <div id="folder-preview-list" style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;margin-bottom:10px;"></div>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="folder-name-input" class="field-input" placeholder="フォルダ名（例: 南大泉5丁目）" style="flex:1;" />
-        <button onclick="createFolder()" style="padding:0 16px;background:var(--accent);border:none;border-radius:var(--radius-sm);color:#fff;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">作成</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="folder-name-input" class="field-input" placeholder="フォルダ名を付けて保存" style="flex:1;" />
+        <button onclick="createFolder()" style="padding:0 16px;height:40px;background:var(--accent);border:none;border-radius:var(--radius-sm);color:#fff;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">保存</button>
       </div>
     </div>
 
@@ -245,6 +252,8 @@
     <button onclick="autoCreateFoldersByRegion()" style="width:100%;margin-bottom:12px;padding:11px;background:var(--accent-light);border:0.5px solid rgba(26,115,232,0.25);border-radius:var(--radius-sm);color:var(--accent);font-size:13px;font-weight:500;cursor:pointer;">🗂 地域別フォルダを自動作成</button>
     <div id="folder-list" style="display:flex;flex-direction:column;gap:10px;"></div>
     <p id="folder-empty" class="empty-msg" style="display:none">まだフォルダがありません</p>
+
+    </div><!-- /folder-list-view -->
 
     <!-- フォルダ詳細（開いた時） -->
     <div id="folder-detail" style="display:none;">
@@ -299,8 +308,10 @@
 <!-- 編集モーダル -->
 <div class="modal-overlay" id="edit-modal">
   <div class="modal">
-    <p class="modal-title">記録を編集</p>
+    <!-- ID保持用（1つだけ配置） -->
     <input type="hidden" id="edit-id" />
+    <p class="modal-title">記録を編集</p>
+    
     <div>
       <label class="field-label">名前</label>
       <input type="text" id="edit-name" class="field-input" />
@@ -335,17 +346,27 @@
         <button class="seg" data-val="再訪">再訪</button>
       </div>
     </div>
+
+    <!-- ★ 過去の対応メモ履歴を表示するエリア -->
     <div>
-      <label class="field-label">メモ</label>
-      <textarea id="edit-memo"></textarea>
+      <label class="field-label">過去のメモ履歴</label>
+      <div id="edit-memo-history" style="max-height: 120px; overflow-y: auto; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px; margin-bottom: 8px; font-size: 12px; line-height: 1.4;">
+        <!-- JSで過去ログをここに流し込む -->
+      </div>
     </div>
+
+    <!-- ★ 新しいメモを追記する入力欄 -->
+    <div>
+      <label class="field-label">新しいメモを追加</label>
+      <textarea id="edit-memo" placeholder="新しい対応内容を入力（保存すると上の履歴に追加されます）"></textarea>
+    </div>
+
     <div class="modal-btns">
       <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
       <button class="btn-confirm" onclick="confirmEdit()">保存</button>
     </div>
   </div>
 </div>
-
 <script src="app.js"></script>
 </body>
 </html>

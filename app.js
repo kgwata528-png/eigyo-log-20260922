@@ -1,5 +1,9 @@
 const GOOGLE_MAPS_API_KEY = 'AIzaSyDAjCfUJJTzLI2Z8RwLW_O7QGwTO_6mO9U';
 
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ── データバージョン管理（アップデートしてもデータが消えない） ──
 const DATA_VERSION = '1';
 function migrateData() {
@@ -11,8 +15,20 @@ function migrateData() {
 }
 migrateData();
 
-function loadRecords() { try { return JSON.parse(localStorage.getItem('visitRecords') || '[]'); } catch { return []; } }
-function saveRecords(r) { try { localStorage.setItem('visitRecords', JSON.stringify(r)); } catch(e) {} }
+function loadRecords() {
+  try {
+    // sales_records を優先（saveRecord が書き込むキー）、なければ visitRecords を見る
+    const r1 = JSON.parse(localStorage.getItem('sales_records') || 'null');
+    if (r1 && r1.length > 0) return r1;
+    return JSON.parse(localStorage.getItem('visitRecords') || '[]');
+  } catch { return []; }
+}
+function saveRecords(r) {
+  try {
+    localStorage.setItem('sales_records', JSON.stringify(r));
+    localStorage.setItem('visitRecords', JSON.stringify(r)); // 両キーに書いて整合性を保つ
+  } catch(e) {}
+}
 function loadCounters() {
   const today = new Date().toDateString();
   try {
@@ -23,10 +39,13 @@ function loadCounters() {
 function saveCounters(c) { try { localStorage.setItem('counters', JSON.stringify(c)); } catch(e) {} }
 function loadTrail() { try { return JSON.parse(localStorage.getItem('trail') || '[]'); } catch { return []; } }
 function saveTrail(t) { try { localStorage.setItem('trail', JSON.stringify(t)); } catch(e) {} }
+function loadFolders() { try { return JSON.parse(localStorage.getItem('sales_folders') || '[]'); } catch { return []; } }
+function saveFolders(f) { try { localStorage.setItem('sales_folders', JSON.stringify(f)); } catch(e) {} }
 
 let records = loadRecords();
 let counters = loadCounters();
 let trail = loadTrail();
+let folders = loadFolders();
 
 // ── タブ ──
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -44,10 +63,20 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
 // ── カウンター ──
 function renderCounters() {
-  document.getElementById('cnt-absent').textContent = counters.absent;
-  document.getElementById('cnt-intercom').textContent = counters.intercom;
-  document.getElementById('cnt-face').textContent = counters.face;
-  document.getElementById('cnt-total').textContent = counters.absent + counters.intercom + counters.face;
+  const total = counters.absent + counters.intercom + counters.face;
+  const rate = n => total ? Math.round(n / total * 100) : 0;
+
+  document.getElementById('cnt-absent').textContent = counters.absent + '件';
+  document.getElementById('cnt-intercom').textContent = counters.intercom + '件';
+  document.getElementById('cnt-face').textContent = counters.face + '件';
+  document.getElementById('cnt-total').textContent = total;
+
+  const rateAbsent = document.getElementById('rate-absent');
+  const rateIntercom = document.getElementById('rate-intercom');
+  const rateFace = document.getElementById('rate-face');
+  if (rateAbsent) rateAbsent.textContent = `（${rate(counters.absent)}%）`;
+  if (rateIntercom) rateIntercom.textContent = `（${rate(counters.intercom)}%）`;
+  if (rateFace) rateFace.textContent = `（${rate(counters.face)}%）`;
 }
 function bump(type, delta) {
   counters[type] = Math.max(0, counters[type] + delta);
@@ -58,7 +87,40 @@ function bump(type, delta) {
     el.style.transition = 'transform 0.1s';
     el.style.transform = 'scale(1.3)';
     setTimeout(() => { el.style.transform = ''; }, 130);
+    // 統計データに匿名レコードとして記録
+    const responseMap = { absent: '不在', intercom: 'インターホン', face: '対面' };
+    const now = new Date();
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const counterRec = {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      date: dateStr,
+      name: '',
+      address: '',
+      counterOnly: true,
+      response: responseMap[type] || type,
+      visit: '',
+      memo: '',
+      memos: [],
+    };
+    records.push(counterRec);
+    saveRecords(records);
+  } else if (delta < 0) {
+    // 直近の同じ response の counterOnly レコードを1件削除
+    const responseMap = { absent: '不在', intercom: 'インターホン', face: '対面' };
+    const targetResponse = responseMap[type] || type;
+    let removed = false;
+    for (let i = records.length - 1; i >= 0; i--) {
+      if (records[i] && records[i].counterOnly && records[i].response === targetResponse) {
+        records.splice(i, 1);
+        removed = true;
+        break;
+      }
+    }
+    if (removed) saveRecords(records);
   }
+  // カウンター変更を月次統計にリアルタイム反映
+  renderMonthlyStats();
 }
 function resetCounter() {
   if (!confirm('本日のカウントをリセットしますか？')) return;
@@ -102,9 +164,11 @@ function renderMonthlyStats() {
     return false;
   });
 
+  // 上のカウンターも含めた全訪問で集計
   const total = monthRecs.length;
-  const firstVisit = monthRecs.filter(r => r.visit === '初訪').length;
-  const revisit = monthRecs.filter(r => r.visit === '再訪').length;
+  const regularRecs = monthRecs.filter(r => !r.counterOnly);
+  const firstVisit = regularRecs.filter(r => r.visit === '初訪').length;
+  const revisit = regularRecs.filter(r => r.visit === '再訪').length;
   const face = monthRecs.filter(r => r.response === '対面').length;
   const intercom = monthRecs.filter(r => r.response === 'インターホン').length;
   const absent = monthRecs.filter(r => r.response === '不在').length;
@@ -117,9 +181,10 @@ function renderMonthlyStats() {
   const intercomRate = total ? Math.round(intercom / total * 100) : 0;
   const absentRate = total ? Math.round(absent / total * 100) : 0;
 
-  document.getElementById('m-face-rate').textContent = `${faceRate}%`;
-  document.getElementById('m-intercom-rate').textContent = `${intercomRate}%`;
-  document.getElementById('m-absent-rate').textContent = `${absentRate}%`;
+  // 件数（率）形式で表示
+  document.getElementById('m-face-rate').textContent = `${face}件（${faceRate}%）`;
+  document.getElementById('m-intercom-rate').textContent = `${intercom}件（${intercomRate}%）`;
+  document.getElementById('m-absent-rate').textContent = `${absent}件（${absentRate}%）`;
   document.getElementById('m-face-bar').style.width = `${faceRate}%`;
   document.getElementById('m-intercom-bar').style.width = `${intercomRate}%`;
   document.getElementById('m-absent-bar').style.width = `${absentRate}%`;
@@ -133,6 +198,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   });
 });
 setTimeout(renderMonthlyStats, 100);
+setTimeout(renderFolderList, 150);
 
 // ── セグメント ──
 document.querySelectorAll('[id^="seg-"], [id^="eseg-"]').forEach(group => {
@@ -212,6 +278,7 @@ function norm(s) {
 }
 // ── 入力中のリアルタイム重複・候補検索 ──
 // ── 入力中のリアルタイム重複・候補検索（複数表示版） ──
+// ── 入力中のリアルタイム重複・候補検索（最新1件のみ抽出版） ──
 function checkDuplicate() {
   const nameInput = document.getElementById('inp-name');
   const addressInput = document.getElementById('inp-address');
@@ -223,18 +290,27 @@ function checkDuplicate() {
   const nameVal = nameInput ? nameInput.value.trim() : '';
   const addrVal = addressInput ? addressInput.value.trim() : '';
 
-  // どちらも空なら候補欄を隠す
   if (!nameVal && !addrVal) {
     dupeBanner.style.display = 'none';
     dupeList.innerHTML = '';
     return;
   }
 
-  // 過去の記録から検索
   const recs = window.records || JSON.parse(localStorage.getItem('sales_records') || '[]');
-  
-  // 名前 または 住所 が一致する顧客をすべて抽出
-  const matches = recs.filter(r => {
+
+  // ★同一人物をひとつにまとめる（同名・同住所の重複を排除して最新だけ保持）
+  const uniqueCustomerMap = new Map();
+  recs.forEach(r => {
+    if (!r.name && !r.address) return;
+    // 名前と住所をキーにして一意化（後ろにある新しいデータで上書きされる）
+    const key = `${r.name || ''}_${r.address || ''}`;
+    uniqueCustomerMap.set(key, r);
+  });
+
+  const uniqueCustomers = Array.from(uniqueCustomerMap.values());
+
+  // 一致する顧客のみフィルタリング
+  const matches = uniqueCustomers.filter(r => {
     const matchName = nameVal !== '' && r.name && r.name.includes(nameVal);
     const matchAddr = addrVal !== '' && r.address && r.address.includes(addrVal);
     return matchName || matchAddr;
@@ -246,7 +322,7 @@ function checkDuplicate() {
     return;
   }
 
-  // 候補を表示（該当するものを最大5件まで並べて表示）
+  // 重複のない最新顧客候補を表示（最大5件）
   dupeBanner.style.display = 'block';
   dupeList.innerHTML = matches.slice(0, 5).map(item => `
     <div onclick="selectDuplicateCandidate('${item.id}')" style="padding: 10px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; margin-top: 6px; cursor: pointer;">
@@ -260,8 +336,6 @@ function checkDuplicate() {
   `).join('');
 }
 
-// ── 候補をタップしたときに自動入力する処理 ──
-// ── 候補をタップしたときに自動入力する処理 ──
 function selectDuplicateCandidate(id) {
   const recs = window.records || JSON.parse(localStorage.getItem('sales_records') || '[]');
   const target = recs.find(r => String(r.id) === String(id));
@@ -313,52 +387,93 @@ function renderCustomerList() {
 
   const recs = JSON.parse(localStorage.getItem('sales_records') || '[]');
 
+  if (recs.length === 0) {
+    container.innerHTML = '<div style="text-align:center; padding:20px; color:#888;">データがありません</div>';
+    return;
+  }
+
   container.innerHTML = recs.map(cust => {
-    const memoList = cust.memos || [];
+    // 履歴配列の取得（古くて cust.memo しかない場合の互換対応含む）
+    let memoList = Array.isArray(cust.memos) ? cust.memos : [];
+    if (memoList.length === 0 && cust.memo) {
+      memoList = [{
+        id: 'old-1',
+        date: cust.date || '',
+        response: cust.response || '対面',
+        text: cust.memo
+      }];
+    }
+
     const memoCount = memoList.length;
 
-    // ★ メモ群を縦一列（1行1メモ）で作成
-    const memosHtml = memoList.map(m => `
-      <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid #f0f0f0;">
-        <div style="display: flex; align-items: center; gap: 8px; flex: 1; overflow: hidden;">
-          <span style="color: #888; font-size: 12px; white-space: nowrap;">${m.time}</span>
-          <span style="background: #f1f3f4; color: #3c4043; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; white-space: nowrap;">
-            ${m.type}
-          </span>
-          <span style="color: #333; font-size: 13px; word-break: break-all;">${m.text}</span>
+    // ★ 画像通り：各履歴行に「日時・タグ・テキスト・編集ボタン・削除ボタン」を配置
+    const memosHtml = memoList.map((m, idx) => {
+      // 日時・タイプのプロパティ補正（m.date または m.time、m.response または m.type）
+      const displayDate = m.date || m.time || '';
+      const displayType = m.response || m.type || '対面';
+
+      // タイプ別バッジカラー（写真参照：不在＝灰、対面＝緑など）
+      let badgeBg = '#e8f0fe';
+      let badgeColor = '#1a73e8';
+      if (displayType === '不在') {
+        badgeBg = '#f1f3f4';
+        badgeColor = '#5f6368';
+      } else if (displayType === '対面') {
+        badgeBg = '#e6f4ea';
+        badgeColor = '#137333';
+      } else if (displayType === 'インターホン') {
+        badgeBg = '#fef7e0';
+        badgeColor = '#b06000';
+      }
+
+      return `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid #f0f0f0; font-size: 13px;">
+          <!-- 左側：日時、タグ、メモ本文 -->
+          <div style="display: flex; align-items: center; gap: 8px; flex: 1; overflow: hidden; padding-right: 8px;">
+            <span style="color: #888; font-size: 11px; white-space: nowrap; shrink: 0;">${displayDate}</span>
+            <span style="background: ${badgeBg}; color: ${badgeColor}; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; white-space: nowrap; shrink: 0;">
+              ${displayType}
+            </span>
+            <span style="color: #333; font-size: 13px; word-break: break-all; flex: 1; text-align: left;">${m.text || ''}</span>
+          </div>
+
+          <!-- 右側：行ごとの編集・削除ボタン（写真のスタイルを再現） -->
+          <div style="display: flex; gap: 6px; shrink: 0;">
+            <button onclick="openEdit('${cust.id}')" style="background: #e8f0fe; color: #1a73e8; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold;">
+              編集
+            </button>
+            <button onclick="deleteRecord('${cust.id}')" style="background: #fce8e6; color: #c5221f; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold;">
+              削除
+            </button>
+          </div>
         </div>
-        <div style="display: flex; gap: 4px; margin-left: 8px; flex-shrink: 0;">
-          <button onclick="editMemo('${cust.id}', '${m.id}')" style="background: #e8f0fe; color: #1a73e8; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">編集</button>
-          <button onclick="deleteMemo('${cust.id}', '${m.id}')" style="background: #fce8e6; color: #c5221f; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">削除</button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     return `
       <div style="background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
-        <!-- 顧客情報ヘッダー -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 8px;">
+        <!-- 顧客情報ヘッダー（名前・住所・ランク・計〇回） -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
           <div>
-            <h3 style="margin: 0; font-size: 16px; color: #202124;">${cust.name}</h3>
-            <p style="margin: 4px 0 0; font-size: 12px; color: #5f6368;">${cust.address}</p>
+            <h3 style="margin: 0; font-size: 17px; color: #202124;">${cust.name || '名前未入力'}</h3>
+            <p style="margin: 4px 0 0; font-size: 12px; color: #5f6368;">${cust.address || '住所未入力'}</p>
           </div>
           <div style="text-align: right;">
-            <span style="background: ${getRankColor(cust.rank)}; color: #fff; font-weight: bold; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
-              ランク ${cust.rank}
+            <span style="background: #fce8e6; color: #c5221f; font-weight: bold; padding: 3px 10px; border-radius: 12px; font-size: 11px; display: inline-block;">
+              ランク ${cust.rank || 'E'}
             </span>
             <div style="font-size: 11px; color: #70757a; margin-top: 4px;">計 ${memoCount} 回</div>
           </div>
         </div>
 
-        <!-- ★ 縦並びのメモ群（最新が一番上） -->
+        <!-- 縦並びメモ履歴一覧 -->
         <div style="display: flex; flex-direction: column; margin-top: 4px;">
-          ${memosHtml}
+          ${memosHtml || '<div style="color: #aaa; font-size: 12px; padding: 8px 0;">（履歴なし）</div>'}
         </div>
       </div>
     `;
   }).join('');
 }
-
 // ランク別の色を返すユーティリティ
 function getRankColor(rank) {
   switch (rank) {
@@ -413,7 +528,7 @@ async function saveRecord() {
       window.records = (typeof records !== 'undefined' && Array.isArray(records)) ? records : [];
     }
 
-    // ★今回の新しいメモオブジェクト
+    // ★ 今回の新しいメモオブジェクト
     const newMemoObj = {
       id: Date.now().toString(),
       date: dateStr,
@@ -440,7 +555,7 @@ async function saveRecord() {
         currentMemos = [{ id: 'old-1', date: oldRec.date || dateStr, response: oldRec.response || '対面', text: oldRec.memo }];
       }
 
-      // ★ 最新のメモを「配列の先頭（unshift）」に追加して一番上に表示されるようにする
+      // 最新のメモを「配列の先頭（unshift）」に追加
       if (memoText) {
         currentMemos.unshift(newMemoObj);
       }
@@ -452,6 +567,7 @@ async function saveRecord() {
         visit: (typeof getSelected === 'function' ? getSelected('seg-visit') : null) || '再訪',
         response: visitResponse,
         rank: selectedRank, // 最新ランクに更新
+        memo: memoText || oldRec.memo || '', // ★ 単一文字列メモも同期保持！
         memos: currentMemos, // ★ 配列化されたメモ群
         lat: (typeof lastLatLng !== 'undefined' && lastLatLng) ? lastLatLng.lat : oldRec.lat,
         lng: (typeof lastLatLng !== 'undefined' && lastLatLng) ? lastLatLng.lng : oldRec.lng,
@@ -467,6 +583,7 @@ async function saveRecord() {
         rank: selectedRank,
         name: recName,
         address: recAddress,
+        memo: memoText, // ★ 単一文字列メモも同時に保持！
         memos: memoText ? [newMemoObj] : [], // ★ メモ配列として保持
         lat: typeof lastLatLng !== 'undefined' && lastLatLng ? lastLatLng.lat : null,
         lng: typeof lastLatLng !== 'undefined' && lastLatLng ? lastLatLng.lng : null,
@@ -477,7 +594,7 @@ async function saveRecord() {
     // 同期して LocalStorage へ書き込み
     records = window.records;
     try {
-      localStorage.setItem('sales_records', JSON.stringify(window.records));
+      saveRecords(window.records); // 両キーに書き込む
     } catch (e) {
       console.error('LocalStorage Save Error:', e);
     }
@@ -499,6 +616,7 @@ async function saveRecord() {
 
     // 描画・地図描画更新
     if (typeof renderHistory === 'function') renderHistory();
+    if (typeof renderCustomerList === 'function') renderCustomerList();
     if (typeof addVisitMarker === 'function') {
       const targetRec = existingIndex !== -1 ? window.records[existingIndex] : window.records[0];
       if (targetRec.lat && targetRec.lng) addVisitMarker(targetRec);
@@ -509,55 +627,294 @@ async function saveRecord() {
   }
 }
 
-
-// ── 編集・削除 ──
-function openEdit(id) {
-  const rec = records.find(r => r.id === id);
-  if (!rec) return;
-  document.getElementById('edit-id').value = id;
-  document.getElementById('edit-name').value = rec.name;
-  document.getElementById('edit-address').value = rec.address;
-  document.getElementById('edit-memo').value = rec.memo || '';
-  setSelected('eseg-response', rec.response);
-  setSelected('eseg-rank', rec.rank);
-  setSelected('eseg-visit', rec.visit);
-  document.getElementById('edit-modal').classList.add('open');
-}
 function closeModal() {
-  document.getElementById('edit-modal').classList.remove('open');
-}
-function confirmEdit() {
-  const id = parseInt(document.getElementById('edit-id').value);
-  const idx = records.findIndex(r => r.id === id);
-  if (idx === -1) return;
-  records[idx] = {
-    ...records[idx],
-    name: document.getElementById('edit-name').value.trim() || records[idx].name,
-    address: document.getElementById('edit-address').value.trim() || records[idx].address,
-    memo: document.getElementById('edit-memo').value.trim(),
-    response: getSelected('eseg-response'),
-    rank: getSelected('eseg-rank'),
-    visit: getSelected('eseg-visit'),
-  };
-  syncPersonRank(records[idx].name, records[idx].address, records[idx].rank);
-  saveRecords(records);
-  closeModal();
-  renderHistory();
-  if (mapInitialized && typeof createAllMarkers === 'function') {
-    createAllMarkers();
-    }
-}
-function deleteRecord(id) {
-  if (!confirm('この記録を削除しますか？')) return;
-  records = records.filter(r => r.id !== id);
-  saveRecords(records);
-  renderHistory();
+  const modal = document.getElementById('edit-modal');
+  if (modal) modal.classList.remove('open');
 }
 
-// モーダル外タップで閉じる
-document.getElementById('edit-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
+function openEdit(id) {
+  if (id === undefined || id === null) {
+    console.error('openEdit: 引数 id が渡されていません');
+    alert('エラー: 対象データのIDが不明です。');
+    return;
+  }
+
+  const targetRecords = window.records || records || [];
+  const rec = targetRecords.find(r => String(r.id) === String(id));
+  
+  if (!rec) {
+    console.error('対象の記録が見つかりません: ID =', id);
+    alert('対象の記録が見つかりませんでした。');
+    return;
+  }
+
+  // IDの保持
+  const idInput = document.getElementById('edit-id');
+  if (idInput) idInput.value = rec.id;
+
+  const nameInput = document.getElementById('edit-name');
+  if (nameInput) nameInput.value = rec.name || '';
+
+  const addressInput = document.getElementById('edit-address');
+  if (addressInput) addressInput.value = rec.address || '';
+  
+  // ★ 過去のメモ履歴をリスト化して表示する処理
+  const historyContainer = document.getElementById('edit-memo-history');
+  if (historyContainer) {
+    let memosList = Array.isArray(rec.memos) ? rec.memos : [];
+    
+    // 古いデータ構造（memo文字だけ）の互換対応
+    if (memosList.length === 0 && rec.memo) {
+      memosList = [{ date: '過去の記録', text: rec.memo, response: rec.response || '' }];
+    }
+
+    if (memosList.length === 0) {
+      historyContainer.innerHTML = '<div style="color: #888;">（過去のメモはありません）</div>';
+    } else {
+      historyContainer.innerHTML = memosList.map(m => `
+        <div style="border-bottom: 1px solid #eef0f2; padding-bottom: 4px; margin-bottom: 4px;">
+          <span style="color: #666; font-size: 10px;">[${m.date || ''} ${m.response || ''}]</span><br/>
+          <span>${m.text || ''}</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  // ★ 入力欄は空にして追記準備！
+  const memoInput = document.getElementById('edit-memo');
+  if (memoInput) {
+    memoInput.value = '';
+  }
+  
+  if (typeof setSelected === 'function') {
+    setSelected('eseg-response', rec.response);
+    setSelected('eseg-rank', rec.rank);
+    setSelected('eseg-visit', rec.visit);
+  }
+  
+  const modal = document.getElementById('edit-modal');
+  if (modal) modal.classList.add('open');
+}
+
+
+/// ── 削除処理（カードから直接 / モーダルからの両対応） ──
+function deleteRecord(targetId) {
+  // 1. 引数でIDが渡されていればそれを優先
+  // 2. 渡されていなければ HTML の edit-id から取得
+  // 3. それでも無ければ currentEditRecord から取得
+  const idInput = document.getElementById('edit-id');
+  const idVal = targetId || (idInput && idInput.value) || (typeof currentEditRecord !== 'undefined' && currentEditRecord ? currentEditRecord.id : null);
+  
+  if (!idVal && idVal !== 0) {
+    console.error('deleteRecord: 削除対象のIDが特定できませんでした');
+    alert('削除対象のIDが取得できませんでした。');
+    return;
+  }
+
+  const targetRecords = window.records || records || [];
+  
+  // 型（数値 / 文字列）の違いを吸収して該当インデックスを検索
+  const idx = targetRecords.findIndex(r => String(r.id) === String(idVal));
+
+  if (idx === -1) {
+    console.error('deleteRecord: 該当するデータが見つかりません ID =', idVal);
+    alert('削除対象のデータが見つかりませんでした。');
+    return;
+  }
+
+  // 確認アラートを表示
+  const targetName = targetRecords[idx].name || 'この記録';
+  if (!confirm(`「${targetName}」を削除してもよろしいですか？`)) {
+    return; // キャンセルされたら処理中断
+  }
+
+  // 配列から対象データを削除
+  targetRecords.splice(idx, 1);
+  
+  window.records = targetRecords;
+  records = targetRecords;
+
+  // LocalStorageへの保存
+  if (typeof saveRecords === 'function') {
+    saveRecords(targetRecords);
+  } else {
+    localStorage.setItem('sales_records', JSON.stringify(targetRecords));
+  }
+
+  // モーダルが開いていれば閉じる
+  closeModal();
+
+  // 画面と地図の再描画
+  if (typeof renderHistory === 'function') renderHistory();
+  if (typeof renderCustomerList === 'function') renderCustomerList();
+  if (typeof createAllMarkers === 'function') {
+    createAllMarkers();
+  } else if (typeof refreshMapMarkers === 'function') {
+    refreshMapMarkers();
+  }
+
+  alert('削除しました。');
+}
+
+// ── メモ個別削除（最後のメモなら顧客カードごと削除） ──
+function deleteMemo(recordId, memoId) {
+  const targetRecords = window.records || records || [];
+  const idx = targetRecords.findIndex(r => String(r.id) === String(recordId));
+  if (idx === -1) { alert('対象のデータが見つかりませんでした。'); return; }
+
+  const rec = Object.assign({}, targetRecords[idx]);
+  let updatedMemos = Array.isArray(rec.memos) ? [...rec.memos] : [];
+
+  if (!memoId || memoId === 'legacy') {
+    // 旧形式データ（memos配列なし）の場合はメモフィールドをクリア
+    updatedMemos = [];
+    rec.memo = '';
+  } else {
+    updatedMemos = updatedMemos.filter(m => String(m.id) !== String(memoId));
+    rec.memo = updatedMemos.length > 0 ? updatedMemos[0].text : '';
+  }
+  rec.memos = updatedMemos;
+
+  if (!confirm('このメモを削除しますか？')) return;
+
+  if (updatedMemos.length === 0 && !rec.memo) {
+    targetRecords.splice(idx, 1);
+  } else {
+    targetRecords[idx] = rec;
+  }
+
+  window.records = targetRecords;
+  records = targetRecords;
+  localStorage.setItem('sales_records', JSON.stringify(targetRecords));
+
+  if (typeof renderHistory === 'function') renderHistory();
+  if (typeof createAllMarkers === 'function') createAllMarkers();
+  else if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
+}
+
+// ── 編集確定（完全修正版） ──
+function confirmEdit() {
+  const idInput = document.getElementById('edit-id');
+  const idVal = (idInput && idInput.value) || (typeof currentEditRecord !== 'undefined' && currentEditRecord ? currentEditRecord.id : null);
+  
+  const targetRecords = window.records || records || [];
+  const idx = targetRecords.findIndex(r => String(r.id) === String(idVal));
+  
+  if (idx === -1) {
+    alert('編集対象のデータが見つかりませんでした。');
+    return;
+  }
+
+  const nameInput = document.getElementById('edit-name');
+  const addressInput = document.getElementById('edit-address');
+  const memoInput = document.getElementById('edit-memo');
+
+  const updatedName = nameInput ? nameInput.value.trim() : targetRecords[idx].name;
+  const updatedAddress = addressInput ? addressInput.value.trim() : targetRecords[idx].address;
+  const newMemoText = memoInput ? memoInput.value.trim() : '';
+
+  // 1. 既存のメモ配列を取得
+  let updatedMemos = Array.isArray(targetRecords[idx].memos) ? [...targetRecords[idx].memos] : [];
+
+  // 2. 過去の古いデータ構造（rec.memo）からの完全救済（配列が空でrec.memoがある場合）
+  if (updatedMemos.length === 0 && targetRecords[idx].memo) {
+    updatedMemos.push({
+      id: 'old-' + Date.now(),
+      date: targetRecords[idx].date || '過去の記録',
+      response: targetRecords[idx].response || '対面',
+      text: targetRecords[idx].memo
+    });
+  }
+
+  // 3. 新しいメモ入力があれば、配列の先頭（最新）に追加！
+  if (newMemoText !== '') {
+    const now = new Date();
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+    
+    updatedMemos.unshift({
+      id: Date.now().toString(),
+      date: dateStr,
+      response: typeof getSelected === 'function' ? getSelected('eseg-response') : '対面',
+      text: newMemoText
+    });
+  }
+
+  // 4. レコード情報の更新
+  targetRecords[idx] = {
+    ...targetRecords[idx],
+    name: updatedName || targetRecords[idx].name || '名前未入力',
+    address: updatedAddress || targetRecords[idx].address || '住所未入力',
+    // memoプロパティには常に一番最新のメモテキストを入れる（後換性の為）
+    memo: updatedMemos.length > 0 ? updatedMemos[0].text : '', 
+    memos: updatedMemos, // 積み重なった過去ログ配列
+    response: typeof getSelected === 'function' ? getSelected('eseg-response') : targetRecords[idx].response,
+    rank: typeof getSelected === 'function' ? getSelected('eseg-rank') : targetRecords[idx].rank,
+    visit: typeof getSelected === 'function' ? getSelected('eseg-visit') : targetRecords[idx].visit,
+  };
+
+  window.records = targetRecords;
+  records = targetRecords;
+
+  if (typeof syncPersonRank === 'function') {
+    syncPersonRank(targetRecords[idx].name, targetRecords[idx].address, targetRecords[idx].rank);
+  }
+
+  // LocalStorageに保存
+  if (typeof saveRecords === 'function') {
+    saveRecords(targetRecords);
+  } else {
+    localStorage.setItem('sales_records', JSON.stringify(targetRecords));
+  }
+
+  closeModal();
+
+  // 再描画
+  if (typeof renderHistory === 'function') renderHistory();
+  if (typeof renderCustomerList === 'function') renderCustomerList();
+  if (typeof createAllMarkers === 'function') {
+    createAllMarkers();
+  } else if (typeof refreshMapMarkers === 'function') {
+    refreshMapMarkers();
+  }
+  
+  alert('更新しました！');
+}
+
+// 新規記録追加時の処理（修正版）
+function addRecord(newRecord) {
+  if (newRecord.lat && newRecord.lng) {
+    newRecord.lat = parseFloat(newRecord.lat);
+    newRecord.lng = parseFloat(newRecord.lng);
+  }
+
+  // memos配列が用意されていない場合の自動補正
+  if (!Array.isArray(newRecord.memos)) {
+    const now = new Date();
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+    newRecord.memos = newRecord.memo ? [{
+      id: Date.now().toString(),
+      date: newRecord.date || dateStr,
+      response: newRecord.response || '対面',
+      text: newRecord.memo
+    }] : [];
+  }
+
+  if (!window.records || !Array.isArray(window.records)) {
+    window.records = typeof records !== 'undefined' && Array.isArray(records) ? records : [];
+  }
+
+  window.records.push(newRecord);
+  records = window.records;
+  localStorage.setItem('sales_records', JSON.stringify(records));
+
+  // ピンを追加
+  if (typeof addVisitMarker === 'function' && newRecord.lat && newRecord.lng) {
+    addVisitMarker(newRecord);
+  }
+  
+  if (typeof renderHistory === 'function') renderHistory();
+  if (typeof renderCustomerList === 'function') renderCustomerList();
+}
 
 async function bulkGeocode() {
   const targets = records.filter(r => !r.lat && r.address && r.address !== '住所未入力');
@@ -581,10 +938,14 @@ async function bulkGeocode() {
     await new Promise(r => setTimeout(r, 200));
   }
 
-  saveRecords(records);
+  if (typeof saveRecords === 'function') {
+    saveRecords(records);
+  } else {
+    localStorage.setItem('sales_records', JSON.stringify(records));
+  }
   btn.textContent = '📍 住所から地図ピンを一括作成';
   alert(`完了しました。${success}/${targets.length}件のピンを作成しました。`);
-  if (mapInitialized) applyMapFilters();
+  if (typeof applyMapFilters === 'function') applyMapFilters();
 }
 
 
@@ -670,7 +1031,7 @@ function renderHistory() {
 
   if (Array.isArray(records)) {
     records.forEach(r => {
-      if (!r) return;
+      if (!r || r.counterOnly) return;
       const key = (r.name || '') + '__' + (r.address || '');
       if (!grouped[key]) grouped[key] = { name: r.name || '', address: r.address || '', visits: [] };
       grouped[key].visits.push(r);
@@ -712,7 +1073,15 @@ function renderHistory() {
   `;
 
   // 検索・ランクフィルターの適用
-  if (q) persons = persons.filter(p => (p.name || '').toLowerCase().includes(q) || (p.address || '').toLowerCase().includes(q));
+  if (q) persons = persons.filter(p =>
+    (p.name || '').toLowerCase().includes(q) ||
+    (p.address || '').toLowerCase().includes(q) ||
+    p.visits.some(v => {
+      const memos = Array.isArray(v.memos) ? v.memos : [];
+      return (v.memo || '').toLowerCase().includes(q) ||
+             memos.some(m => (m.text || '').toLowerCase().includes(q));
+    })
+  );
   if (rf) persons = persons.filter(p => p.visits[0] && p.visits[0].rank === rf);
 
   const list = document.getElementById('history-list');
@@ -760,22 +1129,57 @@ function renderHistory() {
     const rankBg = (typeof RANK_BG !== 'undefined' && RANK_BG[last.rank]) ? RANK_BG[last.rank] : '#808080';
     const rankTx = (typeof RANK_TX !== 'undefined' && RANK_TX[last.rank]) ? RANK_TX[last.rank] : '#fff';
 
-    const rows = p.visits.map(v => {
-      const safeMemo = typeof escHtml === 'function' ? escHtml(v.memo || '') : (v.memo || '');
-      const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[v.response]) ? RESP_BG[v.response] : 'rgba(107,114,128,0.12)';
-      const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[v.response]) ? RESP_TX[v.response] : '#546e7a';
-      const displayDate = getDisplayDate(v);
+    let totalMemoCount = 0;
+    const rows = p.visits.flatMap(v => {
+      // memos配列を取得（古いデータ形式からの互換対応含む）
+      let memoList = Array.isArray(v.memos) ? v.memos : [];
+      if (memoList.length === 0 && v.memo) {
+        memoList = [{ id: 'legacy', date: v.date || '', response: v.response || '', text: v.memo }];
+      }
+      totalMemoCount += memoList.length;
 
-      return `
-        <div class="visit-row">
-          <span class="visit-date">${displayDate}</span>
-          <span class="resp-badge" style="background:${respBg};color:${respTx}">${v.response || ''}</span>
-          <span class="visit-memo">${safeMemo}</span>
-          <div class="visit-actions">
-            <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
-            <button class="btn-delete" onclick="deleteRecord(${v.id})">削除</button>
-          </div>
-        </div>`;
+      if (memoList.length === 0) {
+        // メモなし行：編集・削除ボタンだけ表示
+        const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[v.response]) ? RESP_BG[v.response] : 'rgba(107,114,128,0.12)';
+        const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[v.response]) ? RESP_TX[v.response] : '#546e7a';
+        return [`
+          <div class="visit-row">
+            <span class="visit-date">${getDisplayDate(v)}</span>
+            <span class="resp-badge" style="background:${respBg};color:${respTx}">${v.response || ''}</span>
+            <span class="visit-memo"></span>
+            <div class="visit-actions">
+              <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
+              <button class="btn-delete" onclick="deleteRecord('${v.id}')">削除</button>
+            </div>
+          </div>`];
+      }
+
+      // 最新順にソート（idが大きい=新しい）
+      memoList = memoList.slice().sort((a, b) => {
+        const ta = parseInt(a.id) || 0;
+        const tb = parseInt(b.id) || 0;
+        return tb - ta;
+      });
+
+      // 過去メモを1行ずつ展開
+      return memoList.map((m, idx) => {
+        const memoResponse = m.response || v.response || '';
+        const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[memoResponse]) ? RESP_BG[memoResponse] : 'rgba(107,114,128,0.12)';
+        const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[memoResponse]) ? RESP_TX[memoResponse] : '#546e7a';
+        const safeMemo = typeof escHtml === 'function' ? escHtml(m.text || '') : (m.text || '');
+        const displayDate = m.date || getDisplayDate(v);
+        const memoId = m.id || 'legacy';
+        return `
+          <div class="visit-row">
+            <span class="visit-date">${displayDate}</span>
+            <span class="resp-badge" style="background:${respBg};color:${respTx}">${memoResponse}</span>
+            <span class="visit-memo">${safeMemo}</span>
+            <div class="visit-actions">
+              <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
+              <button class="btn-delete" onclick="deleteMemo('${v.id}', '${memoId}')">削除</button>
+            </div>
+          </div>`;
+      });
     }).join('');
 
     const safeName = typeof escHtml === 'function' ? escHtml(p.name) : p.name;
@@ -789,7 +1193,7 @@ function renderHistory() {
         </div>
         <div class="person-right">
           <span class="rank-badge" style="background:${rankBg};color:${rankTx}">ランク ${last.rank || '-'}</span>
-          <span class="visit-count">計 ${p.visits.length} 回</span>
+          <span class="visit-count">計 ${totalMemoCount || p.visits.length} 回</span>
         </div>
       </div>
       <div class="visit-log">${rows}</div>
@@ -834,6 +1238,7 @@ let trailPolyline = null, trackingActive = false, watchId = null, currentMarker 
 let lastTrailPoint = null;
 let visitMarkers = [];
 let pinsVisible = true;
+let folderMapMode = false;
 
 // ── ピン非表示 / 表示 切り替えボタン ──
 function togglePins() {
@@ -904,8 +1309,13 @@ window.onMapReady = function() {
   // 全データからマーカー作成
   records.forEach(r => { if (r.lat && r.lng) addVisitMarker(r); });
 
-  // ★ここを追加！マーカー作成後にフィルター（フォルダ・ランク判定）を適用する
-  applyMapFilters();
+  // フォルダ経由で開かれた場合はフォルダフィルターを適用、そうでなければ通常フィルター
+  if (window._pendingFolderFilter) {
+    applyFolderMapFilter(window._pendingFolderFilter);
+    window._pendingFolderFilter = null;
+  } else {
+    applyMapFilters();
+  }
 
   goToCurrentPos();
 };
@@ -961,6 +1371,8 @@ if (document.readyState === 'loading') {
 // ── フィルター適用関数 ──
 function applyMapFilters() {
   if (!map || !Array.isArray(visitMarkers)) return;
+  // フォルダ絞り込み中はランクフィルターを適用しない
+  if (folderMapMode) return;
 
   visitMarkers.forEach(m => {
     // ピン側のランクも大文字に統一
@@ -1005,7 +1417,7 @@ function renderHistory() {
 
   if (Array.isArray(records)) {
     records.forEach(r => {
-      if (!r) return;
+      if (!r || r.counterOnly) return;
       const key = (r.name || '') + '__' + (r.address || '');
       if (!grouped[key]) grouped[key] = { name: r.name || '', address: r.address || '', visits: [] };
       grouped[key].visits.push(r);
@@ -1052,7 +1464,15 @@ function renderHistory() {
   `;
 
   // 検索・ランクフィルターの適用（最新ログのランクで絞り込み）
-  if (q) persons = persons.filter(p => (p.name || '').toLowerCase().includes(q) || (p.address || '').toLowerCase().includes(q));
+  if (q) persons = persons.filter(p =>
+    (p.name || '').toLowerCase().includes(q) ||
+    (p.address || '').toLowerCase().includes(q) ||
+    p.visits.some(v => {
+      const memos = Array.isArray(v.memos) ? v.memos : [];
+      return (v.memo || '').toLowerCase().includes(q) ||
+             memos.some(m => (m.text || '').toLowerCase().includes(q));
+    })
+  );
   if (rf) persons = persons.filter(p => p.visits[0] && p.visits[0].rank === rf);
 
   const list = document.getElementById('history-list');
@@ -1098,22 +1518,57 @@ function renderHistory() {
     const rankBg = (typeof RANK_BG !== 'undefined' && RANK_BG[last.rank]) ? RANK_BG[last.rank] : '#808080';
     const rankTx = (typeof RANK_TX !== 'undefined' && RANK_TX[last.rank]) ? RANK_TX[last.rank] : '#fff';
 
-    const rows = p.visits.map(v => {
-      const safeMemo = typeof escHtml === 'function' ? escHtml(v.memo || '') : (v.memo || '');
-      const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[v.response]) ? RESP_BG[v.response] : 'rgba(107,114,128,0.12)';
-      const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[v.response]) ? RESP_TX[v.response] : '#546e7a';
-      const displayDate = getDisplayDate(v);
+    let totalMemoCount = 0;
+    const rows = p.visits.flatMap(v => {
+      // memos配列を取得（古いデータ形式からの互換対応含む）
+      let memoList = Array.isArray(v.memos) ? v.memos : [];
+      if (memoList.length === 0 && v.memo) {
+        memoList = [{ id: 'legacy', date: v.date || '', response: v.response || '', text: v.memo }];
+      }
+      totalMemoCount += memoList.length;
 
-      return `
-        <div class="visit-row">
-          <span class="visit-date">${displayDate}</span>
-          <span class="resp-badge" style="background:${respBg};color:${respTx}">${v.response || ''}</span>
-          <span class="visit-memo">${safeMemo}</span>
-          <div class="visit-actions">
-            <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
-            <button class="btn-delete" onclick="deleteRecord(${v.id})">削除</button>
-          </div>
-        </div>`;
+      if (memoList.length === 0) {
+        // メモなし行：編集・削除ボタンだけ表示
+        const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[v.response]) ? RESP_BG[v.response] : 'rgba(107,114,128,0.12)';
+        const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[v.response]) ? RESP_TX[v.response] : '#546e7a';
+        return [`
+          <div class="visit-row">
+            <span class="visit-date">${getDisplayDate(v)}</span>
+            <span class="resp-badge" style="background:${respBg};color:${respTx}">${v.response || ''}</span>
+            <span class="visit-memo"></span>
+            <div class="visit-actions">
+              <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
+              <button class="btn-delete" onclick="deleteRecord('${v.id}')">削除</button>
+            </div>
+          </div>`];
+      }
+
+      // 最新順にソート（idが大きい=新しい）
+      memoList = memoList.slice().sort((a, b) => {
+        const ta = parseInt(a.id) || 0;
+        const tb = parseInt(b.id) || 0;
+        return tb - ta;
+      });
+
+      // 過去メモを1行ずつ展開
+      return memoList.map((m, idx) => {
+        const memoResponse = m.response || v.response || '';
+        const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[memoResponse]) ? RESP_BG[memoResponse] : 'rgba(107,114,128,0.12)';
+        const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[memoResponse]) ? RESP_TX[memoResponse] : '#546e7a';
+        const safeMemo = typeof escHtml === 'function' ? escHtml(m.text || '') : (m.text || '');
+        const displayDate = m.date || getDisplayDate(v);
+        const memoId = m.id || 'legacy';
+        return `
+          <div class="visit-row">
+            <span class="visit-date">${displayDate}</span>
+            <span class="resp-badge" style="background:${respBg};color:${respTx}">${memoResponse}</span>
+            <span class="visit-memo">${safeMemo}</span>
+            <div class="visit-actions">
+              <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
+              <button class="btn-delete" onclick="deleteMemo('${v.id}', '${memoId}')">削除</button>
+            </div>
+          </div>`;
+      });
     }).join('');
 
     const safeName = typeof escHtml === 'function' ? escHtml(p.name) : p.name;
@@ -1127,7 +1582,7 @@ function renderHistory() {
         </div>
         <div class="person-right">
           <span class="rank-badge" style="background:${rankBg};color:${rankTx}">ランク ${last.rank || '-'}</span>
-          <span class="visit-count">計 ${p.visits.length} 回</span>
+          <span class="visit-count">計 ${totalMemoCount || p.visits.length} 回</span>
         </div>
       </div>
       <div class="visit-log">${rows}</div>
@@ -1166,6 +1621,42 @@ function renderHistory() {
   list.innerHTML = countBarHtml + mainContentHtml + footerButtonsHtml;
 }
 
+// ── 顧客一覧（名前+住所でグループ化）を返す共通関数 ──
+function getPersonsList() {
+  const grouped = {};
+  if (Array.isArray(records)) {
+    records.filter(r => r && !r.counterOnly).forEach(r => {
+      const key = (r.name || '') + '__' + (r.address || '');
+      if (!grouped[key]) grouped[key] = { name: r.name || '', address: r.address || '', key, visits: [] };
+      grouped[key].visits.push(r);
+    });
+  }
+  return Object.values(grouped);
+}
+
+// ── フォルダ検索プレビュー ──
+function previewFolderSearch() {
+  const query = (document.getElementById('folder-search')?.value || '').trim();
+  const countEl = document.getElementById('folder-preview-count');
+  const listEl = document.getElementById('folder-preview-list');
+  if (!query) { if (countEl) countEl.textContent = ''; if (listEl) listEl.innerHTML = ''; return; }
+  const q = norm(query);
+  const persons = getPersonsList().filter(p =>
+    norm(p.address).includes(q) || norm(p.name).includes(q) ||
+    p.visits.some(v => {
+      const memos = Array.isArray(v.memos) ? v.memos : [];
+      return norm(v.memo || '').includes(q) || memos.some(m => norm(m.text || '').includes(q));
+    })
+  );
+  if (countEl) countEl.textContent = `${persons.length}件がヒット`;
+  if (listEl) listEl.innerHTML = persons.map(p => `
+    <div style="font-size:12px;padding:4px 8px;background:var(--bg3);border-radius:4px;">
+      <span style="font-weight:500;">${escHtml(p.name || '名前未入力')}</span>
+      <span style="color:var(--text3);margin-left:4px;">${escHtml(p.address || '')}</span>
+    </div>
+  `).join('');
+}
+
 function createFolder() {
   const query = document.getElementById('folder-search').value.trim();
   const name = document.getElementById('folder-name-input').value.trim();
@@ -1173,15 +1664,22 @@ function createFolder() {
   if (!name) { alert('フォルダ名を入力してください'); return; }
 
   const q = norm(query);
-  const persons = getPersonsList().filter(p => norm(p.address).includes(q) || norm(p.name).includes(q));
+  const persons = getPersonsList().filter(p =>
+    norm(p.address).includes(q) || norm(p.name).includes(q) ||
+    p.visits.some(v => {
+      const memos = Array.isArray(v.memos) ? v.memos : [];
+      return norm(v.memo || '').includes(q) || memos.some(m => norm(m.text || '').includes(q));
+    })
+  );
   if (!persons.length) { alert('該当する記録がありません'); return; }
 
+  const newId = Date.now();
   folders.unshift({
-    id: Date.now(),
+    id: newId,
     name,
     query,
     personKeys: persons.map(p => p.key),
-    createdAt: Date.now(),
+    createdAt: newId,
   });
   saveFolders(folders);
 
@@ -1191,7 +1689,8 @@ function createFolder() {
   document.getElementById('folder-preview-count').textContent = '';
 
   renderFolderList();
-  alert(`フォルダ「${name}」を作成しました（${persons.length}件）`);
+  // 保存後すぐにフォルダ詳細を開いて顧客カードを表示
+  openFolder(newId);
 }
 
 // 地域名（丁目手前まで）ごとに自動でフォルダを作成
@@ -1239,7 +1738,10 @@ function autoCreateFoldersByRegion() {
 }
 
 function renderFolderList() {
-  document.getElementById('folder-detail').style.display = 'none';
+  const listView = document.getElementById('folder-list-view');
+  const detail = document.getElementById('folder-detail');
+  if (listView) listView.style.display = '';
+  if (detail) detail.style.display = 'none';
   const list = document.getElementById('folder-list');
   const empty = document.getElementById('folder-empty');
   if (!folders.length) { list.innerHTML = ''; empty.style.display = 'block'; return; }
@@ -1269,6 +1771,9 @@ function openFolder(id) {
   const folder = folders.find(f => f.id === id);
   if (!folder) return;
   currentFolderId = id;
+  // 一覧ビューを隠してフォルダ詳細を表示
+  const listView = document.getElementById('folder-list-view');
+  if (listView) listView.style.display = 'none';
   document.getElementById('folder-detail-title').textContent = folder.name;
   document.getElementById('folder-detail').style.display = 'block';
 
@@ -1281,17 +1786,57 @@ function openFolder(id) {
     return;
   }
   detailList.innerHTML = persons.map(p => {
-    const last = p.visits[0];
-    const rows = p.visits.map(v => `
-      <div class="visit-row">
-        <span class="visit-date">${v.date}</span>
-        <span class="resp-badge" style="background:${RESP_BG[v.response]||'rgba(107,114,128,0.12)'};color:${RESP_TX[v.response]||'#546e7a'}">${v.response}</span>
-        <span class="visit-memo">${escHtml(v.memo || '')}</span>
-        <div class="visit-actions">
-          <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
-          <button class="btn-delete" onclick="deleteRecord(${v.id})">削除</button>
-        </div>
-      </div>`).join('');
+    const last = p.visits[0] || {};
+    const rankBg = (typeof RANK_BG !== 'undefined' && RANK_BG[last.rank]) ? RANK_BG[last.rank] : '#808080';
+    const rankTx = (typeof RANK_TX !== 'undefined' && RANK_TX[last.rank]) ? RANK_TX[last.rank] : '#fff';
+
+    let totalMemoCount = 0;
+    const rows = p.visits.flatMap(v => {
+      let memoList = Array.isArray(v.memos) ? v.memos : [];
+      if (memoList.length === 0 && v.memo) {
+        memoList = [{ id: 'legacy', date: v.date || '', response: v.response || '', text: v.memo }];
+      }
+      totalMemoCount += memoList.length;
+
+      if (memoList.length === 0) {
+        const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[v.response]) ? RESP_BG[v.response] : 'rgba(107,114,128,0.12)';
+        const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[v.response]) ? RESP_TX[v.response] : '#546e7a';
+        return [`<div class="visit-row">
+          <span class="visit-date">${v.date || ''}</span>
+          <span class="resp-badge" style="background:${respBg};color:${respTx}">${v.response || ''}</span>
+          <span class="visit-memo"></span>
+          <div class="visit-actions">
+            <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
+            <button class="btn-delete" onclick="deleteRecord('${v.id}')">削除</button>
+          </div>
+        </div>`];
+      }
+
+      // 最新順にソート（idが大きい=新しい）
+      memoList = memoList.slice().sort((a, b) => {
+        const ta = parseInt(a.id) || 0;
+        const tb = parseInt(b.id) || 0;
+        return tb - ta;
+      });
+
+      return memoList.map((m, idx) => {
+        const memoResponse = m.response || v.response || '';
+        const respBg = (typeof RESP_BG !== 'undefined' && RESP_BG[memoResponse]) ? RESP_BG[memoResponse] : 'rgba(107,114,128,0.12)';
+        const respTx = (typeof RESP_TX !== 'undefined' && RESP_TX[memoResponse]) ? RESP_TX[memoResponse] : '#546e7a';
+        const safeMemo = typeof escHtml === 'function' ? escHtml(m.text || '') : (m.text || '');
+        const memoId = m.id || 'legacy';
+        return `<div class="visit-row">
+          <span class="visit-date">${m.date || v.date || ''}</span>
+          <span class="resp-badge" style="background:${respBg};color:${respTx}">${memoResponse}</span>
+          <span class="visit-memo">${safeMemo}</span>
+          <div class="visit-actions">
+            <button class="btn-edit" onclick="openEdit(${v.id})">編集</button>
+            <button class="btn-delete" onclick="deleteMemo('${v.id}', '${memoId}')">削除</button>
+          </div>
+        </div>`;
+      });
+    }).join('');
+
     return `<div class="person-card">
       <div class="person-head">
         <div>
@@ -1299,8 +1844,8 @@ function openFolder(id) {
           <p class="person-addr">${escHtml(p.address)}</p>
         </div>
         <div class="person-right">
-          <span class="rank-badge" style="background:${RANK_BG[last.rank]};color:${RANK_TX[last.rank]}">ランク ${last.rank}</span>
-          <span class="visit-count">計 ${p.visits.length} 回</span>
+          <span class="rank-badge" style="background:${rankBg};color:${rankTx}">ランク ${last.rank || '-'}</span>
+          <span class="visit-count">計 ${totalMemoCount || p.visits.length} 回</span>
         </div>
       </div>
       <div class="visit-log">${rows}</div>
@@ -1311,6 +1856,8 @@ function openFolder(id) {
 function closeFolderDetail() {
   currentFolderId = null;
   document.getElementById('folder-detail').style.display = 'none';
+  const listView = document.getElementById('folder-list-view');
+  if (listView) listView.style.display = '';
 }
 
 function deleteFolder() {
@@ -1322,6 +1869,63 @@ function deleteFolder() {
   saveFolders(folders);
   closeFolderDetail();
   renderFolderList();
+}
+
+// ── フォルダのピンだけ地図に表示 ──
+function viewFolderOnMap() {
+  const folder = folders.find(f => f.id === currentFolderId);
+  if (!folder) return;
+
+  const keys = folder.personKeys;
+
+  // 地図タブのナビボタンをクリックして正式にタブ切り替え（initMap も自動呼出し）
+  const mapBtn = document.querySelector('.nav-btn[data-tab="map"]');
+  if (mapBtn) mapBtn.click();
+
+  if (mapInitialized) {
+    // すでに地図が準備できている場合：少し待ってからフィルター適用（DOM更新待ち）
+    setTimeout(() => {
+      try { google.maps.event.trigger(map, 'resize'); } catch(e) {}
+      applyFolderMapFilter(keys);
+    }, 100);
+  } else {
+    // 地図初期化中：onMapReady で適用するためにキーを保存
+    window._pendingFolderFilter = keys;
+  }
+}
+
+function applyFolderMapFilter(personKeys) {
+  if (!map || !Array.isArray(visitMarkers)) return;
+  folderMapMode = true;
+
+  visitMarkers.forEach(m => {
+    const show = Array.isArray(personKeys) && personKeys.includes(m._personKey);
+    if (m && typeof m.setMap === 'function') {
+      m.setMap(show ? map : null);
+    }
+  });
+
+  // バナーは body 直下に fixed で追加（#tab-map の position を変えると地図が崩れるため）
+  let banner = document.getElementById('folder-map-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'folder-map-banner';
+    banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:1000;background:#1a73e8;color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;white-space:nowrap;display:flex;align-items:center;gap:8px;box-shadow:0 2px 6px rgba(0,0,0,0.3);';
+    banner.innerHTML = '<span id="folder-map-label"></span><button onclick="clearFolderMapFilter()" style="background:rgba(255,255,255,0.3);border:none;color:#fff;border-radius:10px;padding:2px 10px;font-size:12px;cursor:pointer;">解除</button>';
+    document.body.appendChild(banner);
+  }
+  const label = document.getElementById('folder-map-label');
+  const folder = folders.find(f => f.id === currentFolderId);
+  if (label && folder) label.textContent = `📁 ${folder.name}（${personKeys.length}件）`;
+  banner.style.display = 'flex';
+}
+
+function clearFolderMapFilter() {
+  folderMapMode = false;
+  const banner = document.getElementById('folder-map-banner');
+  if (banner) banner.style.display = 'none';
+  // 通常のランクフィルターに戻す
+  applyMapFilters();
 }
 
 if ('serviceWorker' in navigator) {
@@ -1407,6 +2011,8 @@ function addVisitMarker(rec) {
   marker._rank = rank;
   // ★ 2. 重複チェック用にレコードIDを持たせる
   marker._recordId = rec.id;
+  // ★ 3. フォルダフィルター用に personKey を持たせる
+  marker._personKey = (rec.name || '') + '__' + (rec.address || '');
 
   // ★ 吹き出し（InfoWindow）の作成とクリック処理
   const contentString = `
@@ -1534,6 +2140,8 @@ function startTracking() {
           const path = trailPolyline.getPath();
           path.push(new google.maps.LatLng(newPt.lat, newPt.lng));
         }
+        trail.push({ lat: newPt.lat, lng: newPt.lng });
+        saveTrail(trail);
         lastTrailPoint = newPt;
       }
     },
@@ -1563,6 +2171,8 @@ function clearTrail() {
 
   // 「OK」を押したら足跡の線を消去
   trailPolyline.setPath([]);
+  trail = [];
+  saveTrail([]);
   lastTrailPoint = null;
   alert("足跡をクリアしました");
 }
