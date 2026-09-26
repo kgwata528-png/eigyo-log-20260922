@@ -304,6 +304,13 @@ textarea { min-height: 76px; resize: none; line-height: 1.5; font-family: inheri
 .rank-A, .rank-B, .rank-C, .rank-D { background: rgba(229,57,53,0.12); color: #c62828; }
 .rank-E, .rank-F { background: rgba(107,114,128,0.12); color: #546e7a; }
 .visit-count { font-size: 11px; color: var(--text3); }
+.btn-map-person {
+  font-size: 11px; padding: 3px 8px;
+  border-radius: 5px; cursor: pointer; border: none;
+  background: var(--warning-light, #fef7e0); color: var(--warning, #b06000);
+  white-space: nowrap;
+}
+.btn-map-person:disabled { opacity: 0.5; cursor: default; }
 
 .visit-log { border-top: 0.5px solid var(--border); }
 .visit-row {

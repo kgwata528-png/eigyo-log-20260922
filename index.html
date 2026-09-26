@@ -217,6 +217,19 @@
           <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option><option>F</option>
         </select>
       </div>
+      <select id="sort-select" class="rank-select" style="width:100%;" onchange="localStorage.setItem('sort_mode', this.value); renderHistory()">
+        <option value="">並び順：登録順</option>
+        <option value="date-desc">訪問日：新しい順</option>
+        <option value="date-asc">訪問日：古い順</option>
+        <option value="name-asc">名前：昇順（あ→ん）</option>
+        <option value="name-desc">名前：降順（ん→あ）</option>
+        <option value="addr-asc">住所：昇順</option>
+        <option value="addr-desc">住所：降順</option>
+        <option value="rank-asc">ランク：A→F</option>
+        <option value="rank-desc">ランク：F→A</option>
+        <option value="count-desc">訪問回数：多い順</option>
+        <option value="count-asc">訪問回数：少ない順</option>
+      </select>
       <button id="region-toggle" onclick="toggleRegionGroup()" style="padding:8px 12px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--radius-sm);color:var(--text2);font-size:12px;cursor:pointer;align-self:flex-start;">
         🗂 地域別にまとめる
       </button>

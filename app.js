@@ -916,6 +916,78 @@ function addRecord(newRecord) {
   if (typeof renderCustomerList === 'function') renderCustomerList();
 }
 
+// 住所 → 緯度経度（Google Geocoding API）
+async function geocodeAddress(address) {
+  if (!address || address === '住所未入力') return null;
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&language=ja&region=jp&key=${GOOGLE_MAPS_API_KEY}`
+    );
+    const d = await res.json();
+    if (d.status === 'OK' && d.results.length > 0) {
+      const loc = d.results[0].geometry.location;
+      return { lat: loc.lat, lng: loc.lng };
+    }
+  } catch (e) {}
+  return null;
+}
+
+// ── 顧客カード1件だけを地図に表示（座標がなければ住所から作成） ──
+function mapPersonButton(p) {
+  const key = escHtml(encodeURIComponent((p.name || '') + '__' + (p.address || '')));
+  return `<button class="btn-map-person" data-key="${key}" onclick="mapPerson(this)">📍 地図で見る</button>`;
+}
+
+async function mapPerson(btn) {
+  const key = decodeURIComponent(btn.dataset.key);
+  const recs = records.filter(r => r && !r.counterOnly && ((r.name || '') + '__' + (r.address || '')) === key);
+  if (!recs.length) return;
+
+  const withPos = recs.find(r => r.lat && r.lng);
+  let pos = withPos ? { lat: Number(withPos.lat), lng: Number(withPos.lng) } : null;
+
+  if (!pos) {
+    const address = recs[0].address;
+    if (!address || address === '住所未入力') { alert('住所が登録されていません'); return; }
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '検索中…';
+    pos = await geocodeAddress(address);
+    btn.disabled = false;
+    btn.textContent = label;
+    if (!pos) { alert('住所から場所を見つけられませんでした。住所を確認してください。'); return; }
+    recs.forEach(r => { r.lat = pos.lat; r.lng = pos.lng; });
+    saveRecords(records);
+    if (mapInitialized) recs.forEach(r => addVisitMarker(r));
+  }
+
+  const mapBtn = document.querySelector('.nav-btn[data-tab="map"]');
+  if (mapBtn) mapBtn.click();
+
+  if (mapInitialized) {
+    setTimeout(() => {
+      try { google.maps.event.trigger(map, 'resize'); } catch(e) {}
+      focusPersonOnMap(key, pos);
+    }, 100);
+  } else {
+    // 地図初期化中：onMapReady で表示する
+    window._pendingPersonFocus = { key, pos };
+  }
+}
+
+function focusPersonOnMap(key, pos) {
+  if (!map) return;
+  map.setCenter(pos);
+  map.setZoom(18);
+  const marker = visitMarkers.find(m => m._personKey === key);
+  if (marker) {
+    // ランク絞り込みやピン非表示中でも、この顧客のピンは表示する
+    marker.setMap(map);
+    marker.setVisible(true);
+    google.maps.event.trigger(marker, 'click');
+  }
+}
+
 async function bulkGeocode() {
   const targets = records.filter(r => !r.lat && r.address && r.address !== '住所未入力');
   if (!targets.length) { alert('座標が未設定の記録はありません'); return; }
@@ -1317,6 +1389,14 @@ window.onMapReady = function() {
     applyMapFilters();
   }
 
+  // 顧客カードの「地図で見る」から開かれた場合はその顧客へ移動
+  if (window._pendingPersonFocus) {
+    const { key, pos } = window._pendingPersonFocus;
+    window._pendingPersonFocus = null;
+    focusPersonOnMap(key, pos);
+    return;
+  }
+
   goToCurrentPos();
 };
 // 2点間の距離をメートルで計算（Haversine）
@@ -1429,6 +1509,8 @@ function renderHistory() {
   persons.forEach(p => {
     p.visits.sort((a, b) => parseLogTime(b) - parseLogTime(a));
   });
+
+  persons = sortPersons(persons, getSortMode());
 
   // --- ★ 2. 集計（常に最新の訪問ログ visits[0] のランクを採用） ---
   const counts = { total: persons.length, A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
@@ -1583,6 +1665,7 @@ function renderHistory() {
         <div class="person-right">
           <span class="rank-badge" style="background:${rankBg};color:${rankTx}">ランク ${last.rank || '-'}</span>
           <span class="visit-count">計 ${totalMemoCount || p.visits.length} 回</span>
+          ${mapPersonButton(p)}
         </div>
       </div>
       <div class="visit-log">${rows}</div>
@@ -1619,6 +1702,36 @@ function renderHistory() {
   }
 
   list.innerHTML = countBarHtml + mainContentHtml + footerButtonsHtml;
+}
+
+// ── 顧客カードの並べ替え（履歴タブのプルダウン） ──
+const RANK_ORDER = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 };
+function getSortMode() {
+  const sel = document.getElementById('sort-select');
+  const saved = localStorage.getItem('sort_mode') || '';
+  if (sel && !sel.dataset.restored) { sel.value = saved; sel.dataset.restored = '1'; }
+  return sel ? sel.value : saved;
+}
+function countPersonMemos(p) {
+  return p.visits.reduce((n, v) => n + (Array.isArray(v.memos) && v.memos.length ? v.memos.length : (v.memo ? 1 : 0)), 0) || p.visits.length;
+}
+function sortPersons(persons, mode) {
+  if (!mode) return persons; // 登録順（従来通り）
+  const [field, dir] = mode.split('-');
+  const sign = dir === 'desc' ? -1 : 1;
+  const val = {
+    date:  p => parseLogTime(p.visits[0] || {}),
+    name:  p => p.name || '',
+    addr:  p => p.address || '',
+    rank:  p => RANK_ORDER[(p.visits[0] || {}).rank] || 99,
+    count: p => countPersonMemos(p),
+  }[field];
+  if (!val) return persons;
+  return persons.slice().sort((a, b) => {
+    const va = val(a), vb = val(b);
+    const c = typeof va === 'string' ? va.localeCompare(vb, 'ja', { numeric: true }) : va - vb;
+    return c * sign;
+  });
 }
 
 // ── 顧客一覧（名前+住所でグループ化）を返す共通関数 ──
@@ -1846,6 +1959,7 @@ function openFolder(id) {
         <div class="person-right">
           <span class="rank-badge" style="background:${rankBg};color:${rankTx}">ランク ${last.rank || '-'}</span>
           <span class="visit-count">計 ${totalMemoCount || p.visits.length} 回</span>
+          ${mapPersonButton(p)}
         </div>
       </div>
       <div class="visit-log">${rows}</div>
