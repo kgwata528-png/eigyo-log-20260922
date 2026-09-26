@@ -168,8 +168,9 @@ function renderMonthlyStats() {
   document.getElementById('monthly-title').textContent = isCurrentMonth ? '今月の統計' : label;
 
   // recordsの日付は「M/D」形式なので月を判定
+  // カウンタータブで入力したレコードのみ集計（顧客記録は含めない）
   const monthRecs = records.filter(r => {
-    if (!r.date) return false;
+    if (!r || !r.counterOnly || !r.date) return false;
     // timestamp優先
     if (r.timestamp) {
       const d = new Date(r.timestamp);
@@ -184,18 +185,12 @@ function renderMonthlyStats() {
     return false;
   });
 
-  // 上のカウンターも含めた全訪問で集計
   const total = monthRecs.length;
-  const regularRecs = monthRecs.filter(r => !r.counterOnly);
-  const firstVisit = regularRecs.filter(r => r.visit === '初訪').length;
-  const revisit = regularRecs.filter(r => r.visit === '再訪').length;
   const face = monthRecs.filter(r => r.response === '対面').length;
   const intercom = monthRecs.filter(r => r.response === 'インターホン').length;
   const absent = monthRecs.filter(r => r.response === '不在').length;
 
   document.getElementById('m-total').textContent = total;
-  document.getElementById('m-first').textContent = firstVisit;
-  document.getElementById('m-revisit').textContent = revisit;
 
   const faceRate = total ? Math.round(face / total * 100) : 0;
   const intercomRate = total ? Math.round(intercom / total * 100) : 0;
