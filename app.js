@@ -1827,10 +1827,24 @@ function personHasResponse(p, resp) {
     (Array.isArray(v.memos) && v.memos.some(m => m.response === resp))
   );
 }
-function searchFolderPersons(query, resp) {
+// 対面接触回数（メモ履歴があればその中の対面数、なければ記録自体の応答で判定）
+function countPersonFace(p) {
+  return p.visits.reduce((n, v) => {
+    if (Array.isArray(v.memos) && v.memos.length) return n + v.memos.filter(m => m.response === '対面').length;
+    return n + (v.response === '対面' ? 1 : 0);
+  }, 0);
+}
+function matchFaceCount(p, faceCnt) {
+  if (!faceCnt) return true;
+  const n = countPersonFace(p);
+  return faceCnt === '5+' ? n >= 5 : n === Number(faceCnt);
+}
+function searchFolderPersons(query, resp, faceCnt) {
   const q = norm(query || '');
+  if (resp !== '対面') faceCnt = '';
   return getPersonsList().filter(p =>
     (!resp || personHasResponse(p, resp)) &&
+    matchFaceCount(p, faceCnt) &&
     (!q || norm(p.address).includes(q) || norm(p.name).includes(q) ||
       p.visits.some(v => {
         const memos = Array.isArray(v.memos) ? v.memos : [];
@@ -1840,22 +1854,34 @@ function searchFolderPersons(query, resp) {
 }
 function selectFolderResponse(btn) {
   setSelected('fseg-response', btn.dataset.val);
+  const faceRow = document.getElementById('fseg-face-wrap');
+  if (faceRow) faceRow.style.display = btn.dataset.val === '対面' ? 'block' : 'none';
+  if (btn.dataset.val !== '対面') setSelected('fseg-face', '');
   previewFolderSearch();
+}
+function selectFolderFaceCount(btn) {
+  setSelected('fseg-face', btn.dataset.val);
+  previewFolderSearch();
+}
+function faceCountLabel(faceCnt) {
+  return faceCnt ? (faceCnt === '5+' ? '5回以上' : faceCnt + '回') : '';
 }
 
 // ── フォルダ検索プレビュー ──
 function previewFolderSearch() {
   const query = (document.getElementById('folder-search')?.value || '').trim();
   const resp = getSelected('fseg-response');
+  const faceCnt = getSelected('fseg-face');
   const countEl = document.getElementById('folder-preview-count');
   const listEl = document.getElementById('folder-preview-list');
   if (!query && !resp) { if (countEl) countEl.textContent = ''; if (listEl) listEl.innerHTML = ''; return; }
-  const persons = searchFolderPersons(query, resp);
+  const persons = searchFolderPersons(query, resp, faceCnt);
   if (countEl) countEl.textContent = `${persons.length}件がヒット`;
   if (listEl) listEl.innerHTML = persons.map(p => `
     <div style="font-size:12px;padding:4px 8px;background:var(--bg3);border-radius:4px;">
       <span style="font-weight:500;">${escHtml(p.name || '名前未入力')}</span>
       <span style="color:var(--text3);margin-left:4px;">${escHtml(p.address || '')}</span>
+      ${resp === '対面' ? `<span style="color:var(--success);margin-left:4px;">対面${countPersonFace(p)}回</span>` : ''}
     </div>
   `).join('');
 }
@@ -1864,17 +1890,18 @@ function createFolder() {
   const query = document.getElementById('folder-search').value.trim();
   const name = document.getElementById('folder-name-input').value.trim();
   const resp = getSelected('fseg-response');
+  const faceCnt = resp === '対面' ? getSelected('fseg-face') : '';
   if (!query && !resp) { alert('検索条件を入力してください'); return; }
   if (!name) { alert('フォルダ名を入力してください'); return; }
 
-  const persons = searchFolderPersons(query, resp);
+  const persons = searchFolderPersons(query, resp, faceCnt);
   if (!persons.length) { alert('該当する記録がありません'); return; }
 
   const newId = Date.now();
   folders.unshift({
     id: newId,
     name,
-    query: [resp, query].filter(Boolean).join(' '),
+    query: [resp + faceCountLabel(faceCnt), query].filter(Boolean).join(' '),
     personKeys: persons.map(p => p.key),
     createdAt: newId,
   });
@@ -1885,6 +1912,9 @@ function createFolder() {
   document.getElementById('folder-preview-list').innerHTML = '';
   document.getElementById('folder-preview-count').textContent = '';
   setSelected('fseg-response', '');
+  setSelected('fseg-face', '');
+  const faceRow = document.getElementById('fseg-face-wrap');
+  if (faceRow) faceRow.style.display = 'none';
 
   renderFolderList();
   // 保存後すぐにフォルダ詳細を開いて顧客カードを表示
