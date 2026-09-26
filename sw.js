@@ -1,4 +1,4 @@
-const CACHE = 'sales-pwa-v1';
+const CACHE = 'sales-pwa-v2';
 const ASSETS = ['/', '/index.html', '/style.css', '/app.js', '/manifest.json'];
 
 self.addEventListener('install', e => {
