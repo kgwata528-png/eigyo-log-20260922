@@ -147,6 +147,11 @@ function resetCounter() {
   counters = { date: new Date().toDateString(), absent: 0, intercom: 0, face: 0 };
   saveCounters(counters);
   renderCounters();
+  // 本日分のカウンター記録を統計からも削除
+  const today = new Date().toDateString();
+  records = records.filter(r => !(r && r.counterOnly && r.timestamp && new Date(r.timestamp).toDateString() === today));
+  saveRecords(records);
+  renderMonthlyStats();
 }
 renderCounters();
 
