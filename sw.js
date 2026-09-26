@@ -1,4 +1,4 @@
-const CACHE = 'sales-pwa-v3';
+const CACHE = 'sales-pwa-v4';
 // GitHub Pages（/eigyo-log-20260922/）配下でも動くよう相対パスで指定
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.json'];
 

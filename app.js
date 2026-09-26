@@ -638,10 +638,7 @@ async function saveRecord() {
     // 描画・地図描画更新
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderCustomerList === 'function') renderCustomerList();
-    if (typeof addVisitMarker === 'function') {
-      const targetRec = existingIndex !== -1 ? window.records[existingIndex] : window.records[0];
-      if (targetRec.lat && targetRec.lng) addVisitMarker(targetRec);
-    }
+    if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
 
   } catch (err) {
     alert('保存処理中にエラーが発生しました: ' + err.message);
@@ -768,11 +765,7 @@ function deleteRecord(targetId) {
   // 画面と地図の再描画
   if (typeof renderHistory === 'function') renderHistory();
   if (typeof renderCustomerList === 'function') renderCustomerList();
-  if (typeof createAllMarkers === 'function') {
-    createAllMarkers();
-  } else if (typeof refreshMapMarkers === 'function') {
-    refreshMapMarkers();
-  }
+  if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
 
   alert('削除しました。');
 }
@@ -809,12 +802,11 @@ function deleteMemo(recordId, memoId) {
   localStorage.setItem('sales_records', JSON.stringify(targetRecords));
 
   if (typeof renderHistory === 'function') renderHistory();
-  if (typeof createAllMarkers === 'function') createAllMarkers();
-  else if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
+  if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
 }
 
 // ── 編集確定（完全修正版） ──
-function confirmEdit() {
+async function confirmEdit() {
   const idInput = document.getElementById('edit-id');
   const idVal = (idInput && idInput.value) || (typeof currentEditRecord !== 'undefined' && currentEditRecord ? currentEditRecord.id : null);
   
@@ -833,6 +825,12 @@ function confirmEdit() {
   const updatedName = nameInput ? nameInput.value.trim() : targetRecords[idx].name;
   const updatedAddress = addressInput ? addressInput.value.trim() : targetRecords[idx].address;
   const newMemoText = memoInput ? memoInput.value.trim() : '';
+
+  // 住所変更の検知（変更前の顧客キーを控えておく）
+  const oldName = targetRecords[idx].name || '';
+  const oldAddress = targetRecords[idx].address || '';
+  const oldKey = oldName + '__' + oldAddress;
+  const addressChanged = !!updatedAddress && updatedAddress !== oldAddress;
 
   // 1. 既存のメモ配列を取得
   let updatedMemos = Array.isArray(targetRecords[idx].memos) ? [...targetRecords[idx].memos] : [];
@@ -882,6 +880,39 @@ function confirmEdit() {
     syncPersonRank(targetRecords[idx].name, targetRecords[idx].address, targetRecords[idx].rank);
   }
 
+  // ★ 住所が変わったら、同一顧客の全記録の住所をそろえ、新しい住所から座標を取り直す
+  if (addressChanged) {
+    const newAddress = targetRecords[idx].address;
+    const sameName = targetRecords[idx].name;
+    const newKey = sameName + '__' + newAddress;
+    targetRecords.forEach(r => {
+      if (r && ((r.name || '') + '__' + (r.address || '')) === oldKey) {
+        r.name = sameName;
+        r.address = newAddress;
+      }
+    });
+    // フォルダに入っている顧客キーも付け替える
+    if (typeof folders !== 'undefined' && Array.isArray(folders)) {
+      folders.forEach(f => {
+        if (Array.isArray(f.personKeys)) {
+          f.personKeys = [...new Set(f.personKeys.map(k => k === oldKey ? newKey : k))];
+        }
+      });
+      if (typeof saveFolders === 'function') saveFolders(folders);
+    }
+    const pos = await geocodeAddress(newAddress);
+    if (pos) {
+      targetRecords.forEach(r => {
+        if (r && ((r.name || '') + '__' + (r.address || '')) === newKey) {
+          r.lat = pos.lat;
+          r.lng = pos.lng;
+        }
+      });
+    } else {
+      alert('新しい住所から場所を見つけられませんでした。地図のピンは元の位置のままです。');
+    }
+  }
+
   // LocalStorageに保存
   if (typeof saveRecords === 'function') {
     saveRecords(targetRecords);
@@ -894,11 +925,7 @@ function confirmEdit() {
   // 再描画
   if (typeof renderHistory === 'function') renderHistory();
   if (typeof renderCustomerList === 'function') renderCustomerList();
-  if (typeof createAllMarkers === 'function') {
-    createAllMarkers();
-  } else if (typeof refreshMapMarkers === 'function') {
-    refreshMapMarkers();
-  }
+  if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
   
   alert('更新しました！');
 }
@@ -932,9 +959,7 @@ function addRecord(newRecord) {
   localStorage.setItem('sales_records', JSON.stringify(records));
 
   // ピンを追加
-  if (typeof addVisitMarker === 'function' && newRecord.lat && newRecord.lng) {
-    addVisitMarker(newRecord);
-  }
+  if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
   
   if (typeof renderHistory === 'function') renderHistory();
   if (typeof renderCustomerList === 'function') renderCustomerList();
@@ -982,7 +1007,7 @@ async function mapPerson(btn) {
     if (!pos) { alert('住所から場所を見つけられませんでした。住所を確認してください。'); return; }
     recs.forEach(r => { r.lat = pos.lat; r.lng = pos.lng; });
     saveRecords(records);
-    if (mapInitialized) recs.forEach(r => addVisitMarker(r));
+    if (mapInitialized) refreshMapMarkers();
   }
 
   const mapBtn = document.querySelector('.nav-btn[data-tab="map"]');
@@ -1027,7 +1052,6 @@ async function bulkGeocode() {
       rec.lat = loc.lat;
       rec.lng = loc.lng;
       success++;
-      if (mapInitialized) addVisitMarker(rec);
     }
     done++;
     // API制限を避けるため少し待つ
@@ -1040,8 +1064,8 @@ async function bulkGeocode() {
     localStorage.setItem('sales_records', JSON.stringify(records));
   }
   btn.textContent = '📍 住所から地図ピンを一括作成';
+  if (mapInitialized) refreshMapMarkers();
   alert(`完了しました。${success}/${targets.length}件のピンを作成しました。`);
-  if (typeof applyMapFilters === 'function') applyMapFilters();
 }
 
 
@@ -1402,8 +1426,8 @@ window.onMapReady = function() {
     icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3, strokeColor: '#1a73e8' }, offset: '100%', repeat: '80px' }]
   });
 
-  // 全データからマーカー作成
-  records.forEach(r => { if (r.lat && r.lng) addVisitMarker(r); });
+  // 全データからマーカー作成（顧客ごとに1本、最新の記録のランクで表示）
+  refreshMapMarkers(false);
 
   // フォルダ経由で開かれた場合はフォルダフィルターを適用、そうでなければ通常フィルター
   if (window._pendingFolderFilter) {
@@ -2135,9 +2159,10 @@ function addVisitMarker(rec) {
     return null;
   }
 
-  // ★ 1. 重複防止チェック（すでに同じIDのピンが地図上にあれば削除）
+  // ★ 1. 重複防止チェック（同じ顧客のピンがすでにあれば削除）
+  const personKey = (rec.name || '') + '__' + (rec.address || '');
   if (typeof visitMarkers !== 'undefined' && Array.isArray(visitMarkers)) {
-    const existingIndex = visitMarkers.findIndex(m => m._recordId === rec.id);
+    const existingIndex = visitMarkers.findIndex(m => m._personKey === personKey);
     if (existingIndex !== -1) {
       visitMarkers[existingIndex].setMap(null); // 地図上から削除
       visitMarkers.splice(existingIndex, 1);    // 配列から除去
@@ -2175,7 +2200,7 @@ function addVisitMarker(rec) {
   // ★ 2. 重複チェック用にレコードIDを持たせる
   marker._recordId = rec.id;
   // ★ 3. フォルダフィルター用に personKey を持たせる
-  marker._personKey = (rec.name || '') + '__' + (rec.address || '');
+  marker._personKey = personKey;
 
   // ★ 吹き出し（InfoWindow）の作成とクリック処理
   const contentString = `
@@ -2216,6 +2241,39 @@ function addVisitMarker(rec) {
   }
 
   return marker;
+}
+
+// ── 地図ピンを全件作り直す ──
+// 顧客（名前+住所）ごとに1本だけ立て、ランク・吹き出しは最新の記録（最新メモ）に合わせる。
+// 位置は座標を持つ記録のうち最も新しいものを使う。
+function refreshMapMarkers(reapplyFilters = true) {
+  if (!map) return;
+
+  visitMarkers.forEach(m => { if (m) m.setMap(null); });
+  visitMarkers = [];
+
+  const grouped = {};
+  (window.records || records || []).forEach(r => {
+    if (!r || r.counterOnly) return;
+    const key = (r.name || '') + '__' + (r.address || '');
+    (grouped[key] = grouped[key] || []).push(r);
+  });
+
+  Object.values(grouped).forEach(visits => {
+    visits.sort((a, b) => latestActivityTime(b) - latestActivityTime(a));
+    const latest = visits[0];
+    const withPos = visits.find(r => r.lat && r.lng);
+    if (!withPos) return;
+    addVisitMarker({ ...latest, lat: withPos.lat, lng: withPos.lng });
+  });
+
+  if (!reapplyFilters) return;
+  if (folderMapMode) {
+    const folder = folders.find(f => f.id === currentFolderId);
+    if (folder) applyFolderMapFilter(folder.personKeys);
+  } else {
+    applyMapFilters();
+  }
 }
 
 // ── 現在地に移動 ──
@@ -2441,10 +2499,7 @@ function importExcel() {
         if (typeof renderHistory === 'function') renderHistory();
         
         // 地図のピン更新
-        if (typeof addVisitMarker === 'function') {
-          records.forEach(r => { if (r.lat && r.lng) addVisitMarker(r); });
-        }
-        if (typeof applyMapFilters === 'function') applyMapFilters();
+        if (typeof refreshMapMarkers === 'function') refreshMapMarkers();
 
         alert(`${addedCount}件のデータを読み込みました！`);
 
