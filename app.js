@@ -1820,20 +1820,37 @@ function getPersonsList() {
   return Object.values(grouped);
 }
 
+// ── フォルダ検索：キーワード＋種類（対面など）で顧客を絞り込み ──
+function personHasResponse(p, resp) {
+  return p.visits.some(v =>
+    v.response === resp ||
+    (Array.isArray(v.memos) && v.memos.some(m => m.response === resp))
+  );
+}
+function searchFolderPersons(query, resp) {
+  const q = norm(query || '');
+  return getPersonsList().filter(p =>
+    (!resp || personHasResponse(p, resp)) &&
+    (!q || norm(p.address).includes(q) || norm(p.name).includes(q) ||
+      p.visits.some(v => {
+        const memos = Array.isArray(v.memos) ? v.memos : [];
+        return norm(v.memo || '').includes(q) || memos.some(m => norm(m.text || '').includes(q));
+      }))
+  );
+}
+function selectFolderResponse(btn) {
+  setSelected('fseg-response', btn.dataset.val);
+  previewFolderSearch();
+}
+
 // ── フォルダ検索プレビュー ──
 function previewFolderSearch() {
   const query = (document.getElementById('folder-search')?.value || '').trim();
+  const resp = getSelected('fseg-response');
   const countEl = document.getElementById('folder-preview-count');
   const listEl = document.getElementById('folder-preview-list');
-  if (!query) { if (countEl) countEl.textContent = ''; if (listEl) listEl.innerHTML = ''; return; }
-  const q = norm(query);
-  const persons = getPersonsList().filter(p =>
-    norm(p.address).includes(q) || norm(p.name).includes(q) ||
-    p.visits.some(v => {
-      const memos = Array.isArray(v.memos) ? v.memos : [];
-      return norm(v.memo || '').includes(q) || memos.some(m => norm(m.text || '').includes(q));
-    })
-  );
+  if (!query && !resp) { if (countEl) countEl.textContent = ''; if (listEl) listEl.innerHTML = ''; return; }
+  const persons = searchFolderPersons(query, resp);
   if (countEl) countEl.textContent = `${persons.length}件がヒット`;
   if (listEl) listEl.innerHTML = persons.map(p => `
     <div style="font-size:12px;padding:4px 8px;background:var(--bg3);border-radius:4px;">
@@ -1846,24 +1863,18 @@ function previewFolderSearch() {
 function createFolder() {
   const query = document.getElementById('folder-search').value.trim();
   const name = document.getElementById('folder-name-input').value.trim();
-  if (!query) { alert('検索条件を入力してください'); return; }
+  const resp = getSelected('fseg-response');
+  if (!query && !resp) { alert('検索条件を入力してください'); return; }
   if (!name) { alert('フォルダ名を入力してください'); return; }
 
-  const q = norm(query);
-  const persons = getPersonsList().filter(p =>
-    norm(p.address).includes(q) || norm(p.name).includes(q) ||
-    p.visits.some(v => {
-      const memos = Array.isArray(v.memos) ? v.memos : [];
-      return norm(v.memo || '').includes(q) || memos.some(m => norm(m.text || '').includes(q));
-    })
-  );
+  const persons = searchFolderPersons(query, resp);
   if (!persons.length) { alert('該当する記録がありません'); return; }
 
   const newId = Date.now();
   folders.unshift({
     id: newId,
     name,
-    query,
+    query: [resp, query].filter(Boolean).join(' '),
     personKeys: persons.map(p => p.key),
     createdAt: newId,
   });
@@ -1873,6 +1884,7 @@ function createFolder() {
   document.getElementById('folder-name-input').value = '';
   document.getElementById('folder-preview-list').innerHTML = '';
   document.getElementById('folder-preview-count').textContent = '';
+  setSelected('fseg-response', '');
 
   renderFolderList();
   // 保存後すぐにフォルダ詳細を開いて顧客カードを表示
