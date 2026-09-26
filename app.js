@@ -5,11 +5,31 @@ function escHtml(s) {
 }
 
 // ── データバージョン管理（アップデートしてもデータが消えない） ──
-const DATA_VERSION = '1';
+const DATA_VERSION = '2';
 function migrateData() {
   const ver = localStorage.getItem('dataVersion');
   if (ver !== DATA_VERSION) {
-    // 既存データは保持したままバージョンだけ更新
+    // v2: 年の無い日付（"9/3 14:20" など）に年を補い timestamp として保存
+    const recs = loadRecords();
+    recs.forEach(r => {
+      if (!r) return;
+      const parsed = parseDateStr(r.date);
+      if (parsed > 0) {
+        // timestamp が無い、または取込時刻などで日付文字列と月日がズレている場合は日付文字列を正とする
+        const t = r.timestamp ? new Date(r.timestamp) : null;
+        const p = new Date(parsed);
+        if (!t || t.getMonth() !== p.getMonth() || t.getDate() !== p.getDate()) r.timestamp = parsed;
+      }
+      if (Array.isArray(r.memos)) {
+        r.memos.forEach(m => {
+          if (m && !m.timestamp) {
+            const mt = parseMemoTime(m);
+            if (mt > 0) m.timestamp = mt;
+          }
+        });
+      }
+    });
+    if (recs.length) saveRecords(recs);
     localStorage.setItem('dataVersion', DATA_VERSION);
   }
 }
@@ -532,6 +552,7 @@ async function saveRecord() {
     const newMemoObj = {
       id: Date.now().toString(),
       date: dateStr,
+      timestamp: now.getTime(),
       response: visitResponse,
       text: memoText
     };
@@ -552,7 +573,7 @@ async function saveRecord() {
       // 既存のメモ配列を取得（旧形式の文字列メモがある場合は配列に変換して吸収）
       let currentMemos = Array.isArray(oldRec.memos) ? oldRec.memos : [];
       if (!Array.isArray(oldRec.memos) && oldRec.memo) {
-        currentMemos = [{ id: 'old-1', date: oldRec.date || dateStr, response: oldRec.response || '対面', text: oldRec.memo }];
+        currentMemos = [{ id: 'old-1', date: oldRec.date || dateStr, timestamp: parseLogTime(oldRec) || undefined, response: oldRec.response || '対面', text: oldRec.memo }];
       }
 
       // 最新のメモを「配列の先頭（unshift）」に追加
@@ -821,6 +842,7 @@ function confirmEdit() {
     updatedMemos.push({
       id: 'old-' + Date.now(),
       date: targetRecords[idx].date || '過去の記録',
+      timestamp: parseLogTime(targetRecords[idx]) || undefined,
       response: targetRecords[idx].response || '対面',
       text: targetRecords[idx].memo
     });
@@ -834,6 +856,7 @@ function confirmEdit() {
     updatedMemos.unshift({
       id: Date.now().toString(),
       date: dateStr,
+      timestamp: now.getTime(),
       response: typeof getSelected === 'function' ? getSelected('eseg-response') : '対面',
       text: newMemoText
     });
@@ -894,6 +917,7 @@ function addRecord(newRecord) {
     newRecord.memos = newRecord.memo ? [{
       id: Date.now().toString(),
       date: newRecord.date || dateStr,
+      timestamp: parseLogTime(newRecord) || now.getTime(),
       response: newRecord.response || '対面',
       text: newRecord.memo
     }] : [];
@@ -1471,16 +1495,41 @@ function applyMapFilters() {
 }
 
 // ── 日付パース用の安全な関数 ──
+// "2025/9/3", "2025-09-03 14:20", "9/3 14:20", "2025年9月3日" などを解釈する。
+// 年が無い場合は今日より未来にならない直近の年を補う。
+function parseDateStr(str) {
+  if (!str) return 0;
+  const s = String(str).trim();
+  let m = s.match(/^(\d{4})\D+(\d{1,2})\D+(\d{1,2})(?:\D+(\d{1,2}):(\d{2}))?/);
+  if (m) return new Date(+m[1], m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)).getTime();
+  m = s.match(/^(\d{1,2})\D+(\d{1,2})(?:\D+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), m[1] - 1, +m[2], +(m[3] || 0), +(m[4] || 0));
+    if (d.getTime() > now.getTime() + 86400000) d.setFullYear(d.getFullYear() - 1);
+    return d.getTime();
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
 function parseLogTime(r) {
   if (r.timestamp && typeof r.timestamp === 'number') return r.timestamp;
-  if (!r.date) return 0;
-  const parts = String(r.date).split(/[\/\-\s]/).map(n => parseInt(n, 10)).filter(n => !isNaN(n));
-  const currentYear = new Date().getFullYear();
-  
-  if (parts.length === 3) return new Date(parts[0], parts[1] - 1, parts[2]).getTime();
-  if (parts.length === 2) return new Date(currentYear, parts[0] - 1, parts[1]).getTime(); // 動的に本年の年を取得
-  const d = new Date(r.date);
-  return isNaN(d.getTime()) ? 0 : d.getTime();
+  return parseDateStr(r.date);
+}
+
+// メモ1件の日時（新しいメモの id は Date.now() なのでそれを優先）
+function parseMemoTime(m) {
+  if (!m) return 0;
+  if (m.timestamp && typeof m.timestamp === 'number') return m.timestamp;
+  if (/^\d{12,}$/.test(String(m.id))) return parseInt(m.id, 10);
+  return parseDateStr(m.date);
+}
+
+// レコードの最終活動日時（レコード自体と、後から追加されたメモの新しい方）
+function latestActivityTime(r) {
+  const memoTimes = Array.isArray(r.memos) ? r.memos.map(parseMemoTime) : [];
+  return Math.max(parseLogTime(r), ...memoTimes, 0);
 }
 
 // ── 同一人物の全データランク同期（履歴を壊さないよう同期処理は停止、またはそのまま保持） ──
@@ -1507,7 +1556,7 @@ function renderHistory() {
 
   // ★ 1. 各人物の訪問記録を「最新順（新しい順）」にソート！
   persons.forEach(p => {
-    p.visits.sort((a, b) => parseLogTime(b) - parseLogTime(a));
+    p.visits.sort((a, b) => latestActivityTime(b) - latestActivityTime(a));
   });
 
   persons = sortPersons(persons, getSortMode());
@@ -1720,7 +1769,7 @@ function sortPersons(persons, mode) {
   const [field, dir] = mode.split('-');
   const sign = dir === 'desc' ? -1 : 1;
   const val = {
-    date:  p => parseLogTime(p.visits[0] || {}),
+    date:  p => Math.max(0, ...p.visits.map(latestActivityTime)),
     name:  p => p.name || '',
     addr:  p => p.address || '',
     rank:  p => RANK_ORDER[(p.visits[0] || {}).rank] || 99,
@@ -2370,7 +2419,7 @@ function importExcel() {
           const rec = {
             id: Date.now() + Math.floor(Math.random() * 10000),
             date: String(date),
-            timestamp: Date.now(),
+            timestamp: (t => (t > 0 && t <= Date.now() + 86400000) ? t : Date.now())(parseDateStr(date)),
             visit: String(visit),
             response: String(response),
             rank: String(rank).trim().toUpperCase(),
