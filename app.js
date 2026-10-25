@@ -1426,6 +1426,8 @@ window.onMapReady = function() {
     icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3, strokeColor: '#1a73e8' }, offset: '100%', repeat: '80px' }]
   });
 
+  addVisitLegend();
+
   // 全データからマーカー作成（顧客ごとに1本、最新の記録のランクで表示）
   refreshMapMarkers(false);
 
@@ -2192,6 +2194,31 @@ function clearAllData() {
     location.reload();
   }
 }
+// ── 訪問経過日数によるピン形状 ──
+// 7日以内: ▲（訪問済み） / 8〜30日: ●（通常） / 31日以上: ✕（ご無沙汰）
+const VISIT_RECENT_DAYS = 7;
+const VISIT_STALE_DAYS = 30;
+const PIN_PATH_TRIANGLE = 'M 0 -1.15 L 1.1 0.75 L -1.1 0.75 Z';
+const PIN_PATH_CROSS = 'M 0.41 -1 L 1 -0.41 L 0.59 0 L 1 0.41 L 0.41 1 L 0 0.59 L -0.41 1 L -1 0.41 L -0.59 0 L -1 -0.41 L -0.41 -1 L 0 -0.59 Z';
+
+function getVisitShape(daysAgo) {
+  if (daysAgo !== null && daysAgo <= VISIT_RECENT_DAYS) {
+    return { path: PIN_PATH_TRIANGLE, scale: 11, strokeColor: '#FFFFFF', labelOrigin: new google.maps.Point(0, 0.2), mark: '▲' };
+  }
+  if (daysAgo !== null && daysAgo > VISIT_STALE_DAYS) {
+    return { path: PIN_PATH_CROSS, scale: 11, strokeColor: '#333333', labelOrigin: new google.maps.Point(0, 0), mark: '✕' };
+  }
+  return { path: google.maps.SymbolPath.CIRCLE, scale: 8, strokeColor: '#FFFFFF', labelOrigin: new google.maps.Point(0, 0), mark: '●' };
+}
+
+// 地図左下にピン形状の凡例を表示
+function addVisitLegend() {
+  const div = document.createElement('div');
+  div.style.cssText = 'background:rgba(255,255,255,0.92); margin:8px; padding:4px 8px; border-radius:6px; font-size:11px; color:#333; box-shadow:0 1px 3px rgba(0,0,0,0.3); line-height:1.6;';
+  div.textContent = `▲ ${VISIT_RECENT_DAYS}日以内　● ${VISIT_RECENT_DAYS + 1}〜${VISIT_STALE_DAYS}日　✕ ${VISIT_STALE_DAYS + 1}日以上`;
+  map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(div);
+}
+
 function addVisitMarker(rec) {
   if (!rec || !rec.lat || !rec.lng) return null;
 
@@ -2216,18 +2243,24 @@ function addVisitMarker(rec) {
   const bgColor = (typeof RANK_BG !== 'undefined' && RANK_BG[rank]) ? RANK_BG[rank] : '#808080';
   const txColor = (typeof RANK_TX !== 'undefined' && RANK_TX[rank]) ? RANK_TX[rank] : '#ffffff';
 
+  // ★ 最終訪問からの経過日数でピンの形を変える（色はランクのまま）
+  const lastTime = latestActivityTime(rec);
+  const daysAgo = lastTime ? Math.floor((Date.now() - lastTime) / 86400000) : null;
+  const shape = getVisitShape(daysAgo);
+
   const marker = new google.maps.Marker({
     position: { lat: Number(rec.lat), lng: Number(rec.lng) },
     map: activeMap,
     title: rec.name || rec.address || '',
     visible: typeof window.pinsVisible !== 'undefined' ? window.pinsVisible : true,
     icon: {
-      path: google.maps.SymbolPath.CIRCLE,
+      path: shape.path,
       fillColor: bgColor,
       fillOpacity: 0.95,
-      scale: 8, // ★ 12から8に小さく変更！
-      strokeColor: '#FFFFFF',
+      scale: shape.scale,
+      strokeColor: shape.strokeColor,
       strokeWeight: 1.5,
+      labelOrigin: shape.labelOrigin,
     },
     label: {
       text: String(rank),
@@ -2260,6 +2293,9 @@ function addVisitMarker(rec) {
         <span style="margin-left:6px; color:#555; font-weight:500;">
           ${rec.response || ''}
         </span>
+      </div>
+      <div style="font-size:11px; color:#555; margin-bottom:4px;">
+        ${shape.mark} 最終訪問: ${daysAgo === null ? '不明' : daysAgo === 0 ? '今日' : daysAgo + '日前'}
       </div>
       ${rec.memo ? `<div style="font-size:11px; color:#777; border-top:1px solid #eee; padding-top:4px; margin-top:4px;">${rec.memo}</div>` : ''}
     </div>
