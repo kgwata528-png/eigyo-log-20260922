@@ -2203,12 +2203,12 @@ const PIN_PATH_CROSS = 'M 0.41 -1 L 1 -0.41 L 0.59 0 L 1 0.41 L 0.41 1 L 0 0.59 
 
 function getVisitShape(daysAgo) {
   if (daysAgo !== null && daysAgo <= VISIT_RECENT_DAYS) {
-    return { path: PIN_PATH_TRIANGLE, scale: 11, strokeColor: '#FFFFFF', labelOrigin: new google.maps.Point(0, 0.2), mark: '▲' };
+    return { path: PIN_PATH_TRIANGLE, scale: 9, strokeColor: '#FFFFFF', labelOrigin: new google.maps.Point(0, 0.2), mark: '▲' };
   }
   if (daysAgo !== null && daysAgo > VISIT_STALE_DAYS) {
-    return { path: PIN_PATH_CROSS, scale: 11, strokeColor: '#333333', labelOrigin: new google.maps.Point(0, 0), mark: '✕' };
+    return { path: PIN_PATH_CROSS, scale: 9, strokeColor: '#333333', labelOrigin: new google.maps.Point(0, 0), mark: '✕' };
   }
-  return { path: google.maps.SymbolPath.CIRCLE, scale: 8, strokeColor: '#FFFFFF', labelOrigin: new google.maps.Point(0, 0), mark: '●' };
+  return { path: google.maps.SymbolPath.CIRCLE, scale: 6.5, strokeColor: '#FFFFFF', labelOrigin: new google.maps.Point(0, 0), mark: '●' };
 }
 
 // 地図左下にピン形状の凡例を表示
@@ -2265,7 +2265,7 @@ function addVisitMarker(rec) {
     label: {
       text: String(rank),
       color: txColor,
-      fontSize: '9px', // ★ 11pxから9pxに小さく変更！
+      fontSize: '8px',
       fontWeight: 'bold'
     }
   });
