@@ -49,12 +49,20 @@ function saveRecords(r) {
     localStorage.setItem('visitRecords', JSON.stringify(r)); // 両キーに書いて整合性を保つ
   } catch(e) {}
 }
+function emptyCounters(date) {
+  return { date, first: { absent: 0, intercom: 0, face: 0 }, revisit: { absent: 0, intercom: 0, face: 0 } };
+}
 function loadCounters() {
   const today = new Date().toDateString();
   try {
     const d = JSON.parse(localStorage.getItem('counters') || '{}');
-    return d.date === today ? d : { date: today, absent: 0, intercom: 0, face: 0 };
-  } catch { return { date: today, absent: 0, intercom: 0, face: 0 }; }
+    if (d.date !== today) return emptyCounters(today);
+    if (d.first && d.revisit) return d;
+    // 旧形式（初訪/再訪の区別なし）は初訪として引き継ぐ
+    const c = emptyCounters(today);
+    ['absent', 'intercom', 'face'].forEach(k => { c.first[k] = d[k] || 0; });
+    return c;
+  } catch { return emptyCounters(today); }
 }
 function saveCounters(c) { try { localStorage.setItem('counters', JSON.stringify(c)); } catch(e) {} }
 function loadTrail() { try { return JSON.parse(localStorage.getItem('trail') || '[]'); } catch { return []; } }
@@ -82,28 +90,30 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 });
 
 // ── カウンター ──
+const VISIT_LABEL = { first: '初訪', revisit: '再訪' };
 function renderCounters() {
-  const total = counters.absent + counters.intercom + counters.face;
-  const rate = n => total ? Math.round(n / total * 100) : 0;
-
-  document.getElementById('cnt-absent').textContent = counters.absent + '件';
-  document.getElementById('cnt-intercom').textContent = counters.intercom + '件';
-  document.getElementById('cnt-face').textContent = counters.face + '件';
+  let total = 0;
+  ['first', 'revisit'].forEach(v => {
+    const c = counters[v];
+    const sub = c.absent + c.intercom + c.face;
+    total += sub;
+    // 率は初訪・再訪それぞれの小計に対する割合
+    const rate = n => sub ? Math.round(n / sub * 100) : 0;
+    ['absent', 'intercom', 'face'].forEach(t => {
+      document.getElementById(`cnt-${v}-${t}`).textContent = c[t] + '件';
+      const rateEl = document.getElementById(`rate-${v}-${t}`);
+      if (rateEl) rateEl.textContent = `（${rate(c[t])}%）`;
+    });
+    document.getElementById(`cnt-${v}-total`).textContent = sub;
+  });
   document.getElementById('cnt-total').textContent = total;
-
-  const rateAbsent = document.getElementById('rate-absent');
-  const rateIntercom = document.getElementById('rate-intercom');
-  const rateFace = document.getElementById('rate-face');
-  if (rateAbsent) rateAbsent.textContent = `（${rate(counters.absent)}%）`;
-  if (rateIntercom) rateIntercom.textContent = `（${rate(counters.intercom)}%）`;
-  if (rateFace) rateFace.textContent = `（${rate(counters.face)}%）`;
 }
-function bump(type, delta) {
-  counters[type] = Math.max(0, counters[type] + delta);
+function bump(visit, type, delta) {
+  counters[visit][type] = Math.max(0, counters[visit][type] + delta);
   saveCounters(counters);
   renderCounters();
   if (delta > 0) {
-    const el = document.getElementById('cnt-' + type);
+    const el = document.getElementById(`cnt-${visit}-${type}`);
     el.style.transition = 'transform 0.1s';
     el.style.transform = 'scale(1.3)';
     setTimeout(() => { el.style.transform = ''; }, 130);
@@ -119,7 +129,7 @@ function bump(type, delta) {
       address: '',
       counterOnly: true,
       response: responseMap[type] || type,
-      visit: '',
+      visit: VISIT_LABEL[visit],
       memo: '',
       memos: [],
     };
@@ -131,7 +141,7 @@ function bump(type, delta) {
     const targetResponse = responseMap[type] || type;
     let removed = false;
     for (let i = records.length - 1; i >= 0; i--) {
-      if (records[i] && records[i].counterOnly && records[i].response === targetResponse) {
+      if (records[i] && records[i].counterOnly && records[i].response === targetResponse && counterVisit(records[i]) === VISIT_LABEL[visit]) {
         records.splice(i, 1);
         removed = true;
         break;
@@ -144,7 +154,7 @@ function bump(type, delta) {
 }
 function resetCounter() {
   if (!confirm('本日のカウントをリセットしますか？')) return;
-  counters = { date: new Date().toDateString(), absent: 0, intercom: 0, face: 0 };
+  counters = emptyCounters(new Date().toDateString());
   saveCounters(counters);
   renderCounters();
   // 本日分のカウンター記録を統計からも削除
@@ -153,6 +163,8 @@ function resetCounter() {
   saveRecords(records);
   renderMonthlyStats();
 }
+// 区別導入前のカウンター記録（visit 空）は初訪扱い
+function counterVisit(r) { return r.visit === '再訪' ? '再訪' : '初訪'; }
 renderCounters();
 
 // ── 月次統計 ──
@@ -196,6 +208,13 @@ function renderMonthlyStats() {
   const absent = monthRecs.filter(r => r.response === '不在').length;
 
   document.getElementById('m-total').textContent = total;
+  ['first', 'revisit'].forEach(v => {
+    const recs = monthRecs.filter(r => counterVisit(r) === VISIT_LABEL[v]);
+    document.getElementById(`m-${v}-total`).textContent = recs.length;
+    document.getElementById(`m-${v}-absent`).textContent = recs.filter(r => r.response === '不在').length;
+    document.getElementById(`m-${v}-intercom`).textContent = recs.filter(r => r.response === 'インターホン').length;
+    document.getElementById(`m-${v}-face`).textContent = recs.filter(r => r.response === '対面').length;
+  });
 
   const faceRate = total ? Math.round(face / total * 100) : 0;
   const intercomRate = total ? Math.round(intercom / total * 100) : 0;

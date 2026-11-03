@@ -45,39 +45,86 @@
     <div class="total-block">
       <p class="total-label">本日の全訪問数</p>
       <p class="total-num" id="cnt-total">0</p>
+      <div class="total-sub">
+        <span>初訪<b id="cnt-first-total">0</b></span>
+        <span>再訪<b id="cnt-revisit-total">0</b></span>
+      </div>
     </div>
-    <div class="counter-rows">
-      <div class="counter-row">
-        <div>
-          <p class="counter-row-label">不在</p>
-          <p class="counter-row-num" id="cnt-absent">0</p>
-          <p id="rate-absent" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
-        </div>
-        <div class="counter-row-btns">
-          <button class="btn-minus" onclick="bump('absent',-1)" aria-label="不在を減らす">－</button>
-          <button class="btn-record" onclick="bump('absent',1)">記録する</button>
+    <div class="counter-cols">
+      <div class="counter-col">
+        <p class="counter-col-title">初訪</p>
+        <div class="counter-rows">
+          <div class="counter-row">
+            <div>
+              <p class="counter-row-label">不在</p>
+              <p class="counter-row-num" id="cnt-first-absent">0</p>
+              <p id="rate-first-absent" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
+            </div>
+            <div class="counter-row-btns">
+              <button class="btn-minus" onclick="bump('first','absent',-1)" aria-label="初訪の不在を減らす">－</button>
+              <button class="btn-record" onclick="bump('first','absent',1)">記録する</button>
+            </div>
+          </div>
+          <div class="counter-row">
+            <div>
+              <p class="counter-row-label">インターホン</p>
+              <p class="counter-row-num" id="cnt-first-intercom">0</p>
+              <p id="rate-first-intercom" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
+            </div>
+            <div class="counter-row-btns">
+              <button class="btn-minus" onclick="bump('first','intercom',-1)" aria-label="初訪のインターホンを減らす">－</button>
+              <button class="btn-record" onclick="bump('first','intercom',1)">記録する</button>
+            </div>
+          </div>
+          <div class="counter-row">
+            <div>
+              <p class="counter-row-label">対面</p>
+              <p class="counter-row-num" id="cnt-first-face">0</p>
+              <p id="rate-first-face" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
+            </div>
+            <div class="counter-row-btns">
+              <button class="btn-minus" onclick="bump('first','face',-1)" aria-label="初訪の対面を減らす">－</button>
+              <button class="btn-record" onclick="bump('first','face',1)">記録する</button>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="counter-row">
-        <div>
-          <p class="counter-row-label">インターホン</p>
-          <p class="counter-row-num" id="cnt-intercom">0</p>
-          <p id="rate-intercom" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
-        </div>
-        <div class="counter-row-btns">
-          <button class="btn-minus" onclick="bump('intercom',-1)" aria-label="インターホンを減らす">－</button>
-          <button class="btn-record" onclick="bump('intercom',1)">記録する</button>
-        </div>
-      </div>
-      <div class="counter-row">
-        <div>
-          <p class="counter-row-label">対面</p>
-          <p class="counter-row-num" id="cnt-face">0</p>
-          <p id="rate-face" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
-        </div>
-        <div class="counter-row-btns">
-          <button class="btn-minus" onclick="bump('face',-1)" aria-label="対面を減らす">－</button>
-          <button class="btn-record" onclick="bump('face',1)">記録する</button>
+      <div class="counter-col">
+        <p class="counter-col-title revisit">再訪</p>
+        <div class="counter-rows">
+          <div class="counter-row">
+            <div>
+              <p class="counter-row-label">不在</p>
+              <p class="counter-row-num" id="cnt-revisit-absent">0</p>
+              <p id="rate-revisit-absent" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
+            </div>
+            <div class="counter-row-btns">
+              <button class="btn-minus" onclick="bump('revisit','absent',-1)" aria-label="再訪の不在を減らす">－</button>
+              <button class="btn-record" onclick="bump('revisit','absent',1)">記録する</button>
+            </div>
+          </div>
+          <div class="counter-row">
+            <div>
+              <p class="counter-row-label">インターホン</p>
+              <p class="counter-row-num" id="cnt-revisit-intercom">0</p>
+              <p id="rate-revisit-intercom" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
+            </div>
+            <div class="counter-row-btns">
+              <button class="btn-minus" onclick="bump('revisit','intercom',-1)" aria-label="再訪のインターホンを減らす">－</button>
+              <button class="btn-record" onclick="bump('revisit','intercom',1)">記録する</button>
+            </div>
+          </div>
+          <div class="counter-row">
+            <div>
+              <p class="counter-row-label">対面</p>
+              <p class="counter-row-num" id="cnt-revisit-face">0</p>
+              <p id="rate-revisit-face" style="font-size:11px;color:var(--text3);margin-top:2px;">（0%）</p>
+            </div>
+            <div class="counter-row-btns">
+              <button class="btn-minus" onclick="bump('revisit','face',-1)" aria-label="再訪の対面を減らす">－</button>
+              <button class="btn-record" onclick="bump('revisit','face',1)">記録する</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -98,6 +145,16 @@
         <div style="text-align:center;">
           <p style="font-size:11px;color:var(--text2);margin-bottom:2px;">合計</p>
           <p style="font-size:24px;font-weight:600;color:var(--accent);" id="m-total">0</p>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;font-size:12px;color:var(--text2);">
+          <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;">
+            <p style="font-weight:600;color:var(--accent);margin-bottom:4px;">初訪 <span id="m-first-total">0</span>件</p>
+            <p>不在 <span id="m-first-absent">0</span> / インターホン <span id="m-first-intercom">0</span> / 対面 <span id="m-first-face">0</span></p>
+          </div>
+          <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:8px 10px;">
+            <p style="font-weight:600;color:#1b5e20;margin-bottom:4px;">再訪 <span id="m-revisit-total">0</span>件</p>
+            <p>不在 <span id="m-revisit-absent">0</span> / インターホン <span id="m-revisit-intercom">0</span> / 対面 <span id="m-revisit-face">0</span></p>
+          </div>
         </div>
       </div>
 

@@ -139,6 +139,23 @@ html, body {
 }
 .btn-record:active { opacity: 0.7; }
 
+/* 初訪／再訪の2列カウンター */
+.total-sub { display: flex; justify-content: center; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--text2); }
+.total-sub b { font-size: 15px; font-weight: 600; color: var(--text); margin-left: 4px; }
+.counter-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.counter-col-title {
+  text-align: center; font-size: 13px; font-weight: 600;
+  padding: 6px 0; margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-light); color: var(--accent);
+}
+.counter-col-title.revisit { background: rgba(30,142,62,0.12); color: #1b5e20; }
+.counter-cols .counter-row { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; }
+.counter-cols .counter-row-num { font-size: 26px; }
+.counter-cols .counter-row-btns { gap: 6px; }
+.counter-cols .btn-minus { width: 38px; height: 38px; flex-shrink: 0; }
+.counter-cols .btn-record { flex: 1; width: auto; height: 38px; }
+
 .btn-reset {
   width: 100%; margin-top: 16px;
   padding: 11px;
